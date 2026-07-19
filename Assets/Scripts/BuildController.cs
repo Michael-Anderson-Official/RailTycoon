@@ -41,6 +41,9 @@ public class BuildController : MonoBehaviour
         ClearRoute();
         mode = m;
         if (UIController.I != null) UIController.I.OnModeChanged();
+        if (m == Mode.Track) UIController.Toast("つなぎたい駅を2つ、順にタップ");
+        else if (m == Mode.Station) UIController.Toast("地面をタップして位置を選び、「ここに建設」で確定");
+        else if (m == Mode.Train) UIController.Toast("編成を選んでから、停車駅を順にタップ→「発車!」");
     }
 
     public void HandleTap(Ray ray)
@@ -73,7 +76,15 @@ public class BuildController : MonoBehaviour
                 break;
             case Mode.Track:
                 if (tapped != null) TapTrackStation(tapped);
-                else ClearTrackSel();
+                else if (trackFirst != null)
+                {
+                    ClearTrackSel();
+                    UIController.Toast("選択を解除しました");
+                }
+                else if (TrackNetwork.stations.Count < 2)
+                    UIController.Toast("先に「駅」モードで駅を2つ建ててください(「ここに建設」で確定)");
+                else
+                    UIController.Toast("駅をタップしてください(ズームすると狙いやすい)");
                 break;
             case Mode.Train:
                 if (tapped != null) TapRouteStation(tapped);
@@ -159,9 +170,9 @@ public class BuildController : MonoBehaviour
                 float d = Vector3.Distance(a.End(sa), st.End(sb));
                 if (d < best) { best = d; bestSa = sa; bestSb = sb; }
             }
-        if (best < 50f)
+        if (best < 12f)
         {
-            UIController.Toast("駅同士が近すぎます");
+            UIController.Toast("駅同士が近すぎて接続できません(駅を少し離して建ててください)");
             return;
         }
         double cost = best * GameState.TrackCostPerM;

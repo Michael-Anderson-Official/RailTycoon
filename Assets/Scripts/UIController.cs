@@ -241,7 +241,7 @@ public class UIController : MonoBehaviour
     {
         var p = Panel("Toast", transform, new Vector2(0.05f, 0), new Vector2(0.95f, 0), new Vector2(0, 104), new Vector2(0, 168), new Color(0, 0, 0, 0.65f));
         toastBg = p.gameObject;
-        toastText = Label("T", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(12, 4), new Vector2(-12, -4), TextAnchor.MiddleCenter);
+        toastText = Label("T", p.transform, "", 28, Vector2.zero, Vector2.one, new Vector2(12, 4), new Vector2(-12, -4), TextAnchor.MiddleCenter);
         toastBg.SetActive(false);
     }
 
@@ -250,7 +250,7 @@ public class UIController : MonoBehaviour
         if (I == null) { Debug.Log("Toast: " + msg); return; }
         I.toastText.text = msg;
         I.toastBg.SetActive(true);
-        I.toastUntil = Time.unscaledTime + 3f;
+        I.toastUntil = Time.unscaledTime + 4.5f;
     }
 
     public void ShowStationInfo(Station st)

@@ -76,7 +76,8 @@ public class Station : MonoBehaviour
         var col = gameObject.GetComponent<BoxCollider>();
         if (col == null) col = gameObject.AddComponent<BoxCollider>();
         col.center = new Vector3(0, 5, 0);
-        col.size = new Vector3(layout.totalWidth + 16f, 10f, (H + T) * 2f);
+        // スマホでのタップを外しにくいよう実寸よりだいぶ大きめに取る
+        col.size = new Vector3(layout.totalWidth + 50f, 10f, (H + T) * 2f + 30f);
 
         var labelGo = new GameObject("Label");
         labelGo.transform.SetParent(transform, false);
