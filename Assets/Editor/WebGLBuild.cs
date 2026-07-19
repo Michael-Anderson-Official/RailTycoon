@@ -45,10 +45,11 @@ public static class WebGLBuild
         var html = System.IO.File.ReadAllText(htmlPath);
         html = System.Text.RegularExpressions.Regex.Replace(
             html, "<title>.*?</title>", "<title>レールタイクーン</title>");
+        // ?v= はiOSのapple-touch-iconキャッシュ対策(アイコンを変えたら数字を上げる)
         const string headExtra =
-            "<link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"icons/icon-32.png\">\n" +
-            "    <link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"icons/icon-180.png\">\n" +
-            "    <link rel=\"manifest\" href=\"manifest.webmanifest\">\n" +
+            "<link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"icons/icon-32.png?v=2\">\n" +
+            "    <link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"icons/icon-180.png?v=2\">\n" +
+            "    <link rel=\"manifest\" href=\"manifest.webmanifest?v=2\">\n" +
             "    <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\n" +
             "    <meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\">\n" +
             "    <meta name=\"apple-mobile-web-app-title\" content=\"レールタイクーン\">\n" +
