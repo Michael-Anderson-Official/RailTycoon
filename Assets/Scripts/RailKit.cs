@@ -89,6 +89,29 @@ public static class RailKit
         }
     }
 
+    // 2D断面(xy、閉じた輪郭を反時計回り)をzStart..zEndへ押し出す。両端に妻面を張る。
+    // 車体・屋根の丸みを一定断面で作るのに使う
+    public static void AddExtrude(MeshData md, Vector2[] section, float zStart, float zEnd)
+    {
+        int n = section.Length;
+        int b0 = md.v.Count;
+        for (int i = 0; i < n; i++) md.v.Add(new Vector3(section[i].x, section[i].y, zStart));
+        int b1 = md.v.Count;
+        for (int i = 0; i < n; i++) md.v.Add(new Vector3(section[i].x, section[i].y, zEnd));
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            md.t.Add(b0 + i); md.t.Add(b0 + j); md.t.Add(b1 + j);
+            md.t.Add(b0 + i); md.t.Add(b1 + j); md.t.Add(b1 + i);
+        }
+        // 妻面(三角ファン、輪郭は凸に近いので十分)
+        for (int i = 1; i + 1 < n; i++)
+        {
+            md.t.Add(b0); md.t.Add(b0 + i + 1); md.t.Add(b0 + i);       // zStart(外向き-z)
+            md.t.Add(b1); md.t.Add(b1 + i); md.t.Add(b1 + i + 1);       // zEnd(外向き+z)
+        }
+    }
+
     public static Vector3 NormalAt(List<Vector3> pts, int i)
     {
         Vector3 tan;

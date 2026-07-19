@@ -7,6 +7,7 @@ public class Train : MonoBehaviour
 {
     public TrainCatalog.Formation fm;
     public List<Station> route;
+    public List<int> routeTracks; // 各停車駅で入る番線(trackIdx)。routeと同じ長さ
 
     public int idx;      // 現在(または直前に発った)駅のindex
     public int dir = 1;  // 進行方向(route上)
@@ -34,13 +35,15 @@ public class Train : MonoBehaviour
 
     public float HalfTrain => fm.cars * StationLayout.CarLength * 0.5f;
 
-    public void Init(TrainCatalog.Formation formation, List<Station> stations, int startTrack,
+    public void Init(TrainCatalog.Formation formation, List<Station> stations, List<int> tracks,
         int startIdx = 0, int dirInit = 1)
     {
         fm = formation;
         route = stations;
+        routeTracks = tracks;
         idx = Mathf.Clamp(startIdx, 0, route.Count - 1);
         dir = idx >= route.Count - 1 ? -1 : (idx <= 0 ? 1 : (dirInit >= 0 ? 1 : -1));
+        int startTrack = routeTracks[idx];
         curTrack = startTrack;
         carTs = TrainVisual.BuildCars(transform, fm);
         // 開始駅のホームに据え付け
@@ -103,9 +106,15 @@ public class Train : MonoBehaviour
         if (seg == null) { dwellT = 5f; return; }
         int exitSign = seg.SignAt(cur);
         int enterSign = seg.SignAt(to);
-        // 到着駅は進行方向左側のホーム線を優先確保。満線なら発車を待つ
+        // 到着駅は指定番線を確保(空くまで発車を待つ)。指定が無ければ左側優先
         int destTrack;
-        if (!to.TryReserveFor(enterSign, out destTrack)) { dwellT = 3f; return; }
+        int wantTrack = (routeTracks != null && next < routeTracks.Count) ? routeTracks[next] : -1;
+        if (wantTrack >= 0)
+        {
+            if (!to.TryReserveSpecific(wantTrack)) { dwellT = 2.5f; return; }
+            destTrack = wantTrack;
+        }
+        else if (!to.TryReserveFor(enterSign, out destTrack)) { dwellT = 3f; return; }
         // 閉塞: 同一方向の駅間に先行列車がいる間は出発できない
         if (!seg.TryEnter(cur, this))
         {

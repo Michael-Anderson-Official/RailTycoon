@@ -14,6 +14,9 @@ public static class CityGrid
     const float RoadStationMargin = 4f;
     const float TrackClear = 11f;    // 線路中心線から建物を離す半径
 
+    // 街・道路の表示切替(いったんオフ。将来 true で復活)
+    public static bool Enabled = false;
+
     static Transform root;
     static readonly HashSet<long> occupied = new HashSet<long>(); // 建物を建てた/確定したセル
     static readonly HashSet<long> roadDone = new HashSet<long>();
@@ -57,6 +60,7 @@ public static class CityGrid
     // 駅の発展度に応じて周辺セルを埋める。決定的(近い順+セル座標ハッシュ)
     public static void Develop(Station st)
     {
+        if (!Enabled) return;
         if (root == null) Init();
         int target = TargetFor(st.dev);
         int need = target - st.developed;

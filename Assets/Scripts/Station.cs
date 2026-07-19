@@ -113,6 +113,20 @@ public class Station : MonoBehaviour
     public Vector3 TrackWorldPoint(int trackIdx, float z)
         => transform.TransformPoint(new Vector3(layout.trackOffsets[trackIdx], 0, z));
 
+    // 停車可能な番線(左→右の物理順)。UIの「N番線」はこの並び順で1始まり
+    public IReadOnlyList<int> StopTracks => layout.stopTracks;
+    public int PlatformCount => layout.stopTracks.Count;
+    public int PlatformNumberOf(int trackIdx)
+    {
+        int n = layout.stopTracks.IndexOf(trackIdx);
+        return n < 0 ? 0 : n + 1;
+    }
+    public int TrackOfPlatform(int platformNo)
+    {
+        int i = platformNo - 1;
+        return (i >= 0 && i < layout.stopTracks.Count) ? layout.stopTracks[i] : layout.stopTracks[0];
+    }
+
     public bool TryReserve(out int trackIdx)
     {
         foreach (int i in layout.stopTracks)
@@ -126,6 +140,15 @@ public class Station : MonoBehaviour
         }
         trackIdx = -1;
         return false;
+    }
+
+    // 指定番線を確保(空いていなければfalse)。番線指定運転で使う
+    public bool TryReserveSpecific(int trackIdx)
+    {
+        if (trackIdx < 0 || trackIdx >= occupied.Length) return false;
+        if (occupied[trackIdx]) return false;
+        occupied[trackIdx] = true;
+        return true;
     }
 
     // 進行方向左側のホーム線を優先して確保(左側通行)。

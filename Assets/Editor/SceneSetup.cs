@@ -38,7 +38,11 @@ public static class SceneSetup
         Mat("Road", Hex("41444B"), 0f, 0.2f);
         Mat("TrainBase", Color.white, 0.15f, 0.5f);
         Mat("TrainDark", Hex("26282C"), 0.2f, 0.55f);
-        Mat("TrainRoof", Hex("6B7076"), 0.3f, 0.4f);
+        Mat("TrainRoof", Hex("6B7076"), 0.35f, 0.35f);
+        Mat("TrainGlass", Hex("1B2733"), 0.6f, 0.85f);   // 窓ガラス(暗い反射)
+        Mat("TrainUnder", Hex("35383D"), 0.25f, 0.3f);   // 床下機器・台車
+        Mat("TrainPanto", Hex("4A4D53"), 0.6f, 0.5f);    // パンタグラフ
+        Mat("TrainLight", Hex("FFF3C8"), 0.1f, 0.4f);    // 前照灯
         Mat("Marker", new Color(1f, 0.82f, 0.3f, 0.45f), 0f, 0.1f, true);
     }
 

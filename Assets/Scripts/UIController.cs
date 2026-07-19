@@ -10,7 +10,7 @@ public class UIController : MonoBehaviour
 
     Text moneyText, clockText, carriedText, toastText, costText, routeText, infoText, fmInfoText;
     Text carsVal, facesVal, linesVal;
-    GameObject stationPanel, trainPanel, infoPanel, toastBg;
+    GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow;
     readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
     readonly List<KeyValuePair<TrainCatalog.Formation, Image>> fmBtns = new List<KeyValuePair<TrainCatalog.Formation, Image>>();
     readonly List<KeyValuePair<float, Image>> speedBtns = new List<KeyValuePair<float, Image>>();
@@ -231,10 +231,15 @@ public class UIController : MonoBehaviour
             fmBtns.Add(new KeyValuePair<TrainCatalog.Formation, Image>(f, img));
             y -= 66;
         }
-        fmInfoText = Label("FmInfo", p.transform, "編成を選択してください", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 60), new Vector2(-14, y), TextAnchor.UpperLeft);
-        y -= 70;
-        routeText = Label("Route", p.transform, "", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 90), new Vector2(-14, y), TextAnchor.UpperLeft);
-        y -= 100;
+        fmInfoText = Label("FmInfo", p.transform, "編成を選択してください", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 58), new Vector2(-14, y), TextAnchor.UpperLeft);
+        y -= 66;
+        // 番線選択ボタンの置き場所(駅タップ時に動的生成)
+        var prRt = Rect("PlatformRow", p.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 52), new Vector2(-14, y));
+        platformRow = prRt.gameObject;
+        platformRow.SetActive(false);
+        y -= 60;
+        routeText = Label("Route", p.transform, "", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 84), new Vector2(-14, y), TextAnchor.UpperLeft);
+        y -= 94;
         Btn("Launch", p.transform, "発車!", 30, new Vector2(0, 1), new Vector2(0.55f, 1), new Vector2(14, y - 66), new Vector2(0, y), () => BC.LaunchTrain(), BtnActive);
         Btn("ClearR", p.transform, "経路クリア", 24, new Vector2(0.58f, 1), new Vector2(1, 1), new Vector2(0, y - 66), new Vector2(-14, y), () => BC.ClearRoute());
     }
@@ -252,12 +257,42 @@ public class UIController : MonoBehaviour
         if (routeText == null) return;
         if (BC.routeSel.Count == 0)
         {
-            routeText.text = "駅を順にタップして経路を作成";
+            routeText.text = "駅をタップ→番線を選ぶと経路になります";
             return;
         }
         var names = new List<string>();
-        foreach (var s in BC.routeSel) names.Add(s.stationName);
+        for (int i = 0; i < BC.routeSel.Count; i++)
+        {
+            var s = BC.routeSel[i];
+            int pf = s.PlatformNumberOf(BC.routeTrackSel[i]);
+            names.Add(s.stationName + "(" + pf + "番)");
+        }
         routeText.text = "経路: " + string.Join(" → ", names.ToArray());
+    }
+
+    // pendingStationの番線ボタンを列車パネル内に動的生成
+    public void ShowPlatformPicker(Station st)
+    {
+        HidePlatformPicker();
+        if (platformRow == null) return;
+        platformRow.SetActive(true);
+        int n = st.PlatformCount;
+        for (int i = 0; i < n; i++)
+        {
+            int pf = i + 1;
+            float w = 1f / n;
+            Btn("PF" + pf, platformRow.transform, pf + "番線", n > 4 ? 20 : 24,
+                new Vector2(i * w + 0.01f, 0.1f), new Vector2((i + 1) * w - 0.01f, 0.9f),
+                Vector2.zero, Vector2.zero, () => BC.AddRouteStop(pf), new Color(0.2f, 0.55f, 0.75f, 0.95f));
+        }
+    }
+
+    public void HidePlatformPicker()
+    {
+        if (platformRow == null) return;
+        for (int i = platformRow.transform.childCount - 1; i >= 0; i--)
+            Destroy(platformRow.transform.GetChild(i).gameObject);
+        platformRow.SetActive(false);
     }
 
     void BuildInfoPanel()

@@ -29,6 +29,7 @@ public static class SaveLoad
         public string typeId;
         public int cars;
         public int[] route;
+        public int[] tracks;
         public int idx, dir;
     }
 
@@ -92,11 +93,13 @@ public static class SaveLoad
                 r.Add(idxOf[s]);
             }
             if (!ok || r.Count < 2) continue;
+            var tracks = t.routeTracks != null ? t.routeTracks.ToArray() : null;
             d.tr.Add(new TrData
             {
                 typeId = t.fm.type.id,
                 cars = t.fm.cars,
                 route = r.ToArray(),
+                tracks = tracks,
                 idx = Mathf.Clamp(t.idx, 0, r.Count - 1),
                 dir = t.dir,
             });
@@ -177,12 +180,19 @@ public static class SaveLoad
                     route.Add(sts[ri]);
                 }
                 if (!ok) continue;
+                // 番線列を復元(旧セーブでtracks無しなら各駅の停車線を自動割当)
+                var tracks = new List<int>();
+                for (int i = 0; i < route.Count; i++)
+                {
+                    int tr = (td.tracks != null && i < td.tracks.Length) ? td.tracks[i] : -1;
+                    if (tr < 0 || tr >= route[i].occupied.Length) tr = route[i].StopTracks[0];
+                    tracks.Add(tr);
+                }
                 int startIdx = Mathf.Clamp(td.idx, 0, route.Count - 1);
-                int track;
-                if (!route[startIdx].TryReserve(out track)) continue;
+                if (!route[startIdx].TryReserveSpecific(tracks[startIdx])) continue;
                 var go = new GameObject("Train_" + fm.Label);
                 go.transform.SetParent(BuildController.WorldRoot, false);
-                go.AddComponent<Train>().Init(fm, route, track, startIdx, td.dir);
+                go.AddComponent<Train>().Init(fm, route, tracks, startIdx, td.dir);
             }
         return true;
     }

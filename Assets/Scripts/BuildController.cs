@@ -19,6 +19,8 @@ public class BuildController : MonoBehaviour
 
     public TrainCatalog.Formation selFormation;
     public readonly List<Station> routeSel = new List<Station>();
+    public readonly List<int> routeTrackSel = new List<int>();
+    public Station pendingStation;   // 番線選択待ちの駅
     readonly List<GameObject> routeMarkers = new List<GameObject>();
 
     static Transform worldRoot;
@@ -226,9 +228,28 @@ public class BuildController : MonoBehaviour
                 return;
             }
         }
+        // 駅を選んだら番線選択待ちにする。UIが番線ボタンを出す
+        pendingStation = st;
+        if (UIController.I != null) UIController.I.ShowPlatformPicker(st);
+        UIController.Toast(st.stationName + "の番線を選んでください(全" + st.PlatformCount + "番線)");
+    }
+
+    // UIの番線ボタンから呼ばれる。番線を確定して経路に追加
+    public void AddRouteStop(int platformNo)
+    {
+        if (pendingStation == null) return;
+        var st = pendingStation;
+        int track = st.TrackOfPlatform(platformNo);
         routeSel.Add(st);
+        routeTrackSel.Add(track);
         routeMarkers.Add(MakeMarker(st.transform.position, 26f, new Color(0.2f, 0.8f, 1f, 0.5f)));
-        if (UIController.I != null) UIController.I.UpdateRouteLabel();
+        pendingStation = null;
+        if (UIController.I != null)
+        {
+            UIController.I.HidePlatformPicker();
+            UIController.I.UpdateRouteLabel();
+        }
+        UIController.Toast(st.stationName + " " + platformNo + "番線を経路に追加");
     }
 
     public void LaunchTrain()
@@ -238,10 +259,10 @@ public class BuildController : MonoBehaviour
             UIController.Toast("編成を選び、駅を2つ以上タップしてください");
             return;
         }
-        int track;
-        if (!routeSel[0].TryReserve(out track))
+        int track = routeTrackSel[0];
+        if (!routeSel[0].TryReserveSpecific(track))
         {
-            UIController.Toast(routeSel[0].stationName + "の線が空いていません");
+            UIController.Toast(routeSel[0].stationName + " " + routeSel[0].PlatformNumberOf(track) + "番線が塞がっています");
             return;
         }
         if (!GameState.Spend(selFormation.CostYen))
@@ -252,7 +273,7 @@ public class BuildController : MonoBehaviour
         }
         var go = new GameObject("Train_" + selFormation.Label);
         go.transform.SetParent(WorldRoot, false);
-        go.AddComponent<Train>().Init(selFormation, new List<Station>(routeSel), track);
+        go.AddComponent<Train>().Init(selFormation, new List<Station>(routeSel), new List<int>(routeTrackSel));
         SaveLoad.Save();
         UIController.Toast(selFormation.Label + "が営業開始!");
         ClearRoute();
@@ -262,9 +283,15 @@ public class BuildController : MonoBehaviour
     public void ClearRoute()
     {
         routeSel.Clear();
+        routeTrackSel.Clear();
+        pendingStation = null;
         foreach (var m in routeMarkers) if (m != null) Destroy(m);
         routeMarkers.Clear();
-        if (UIController.I != null) UIController.I.UpdateRouteLabel();
+        if (UIController.I != null)
+        {
+            UIController.I.HidePlatformPicker();
+            UIController.I.UpdateRouteLabel();
+        }
     }
 
     // ---- 共通 ----

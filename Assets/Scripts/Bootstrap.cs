@@ -44,8 +44,16 @@ public class Bootstrap : MonoBehaviour
     // 地面と光。エディタのSnapshotからも使う
     public static GameObject BuildEnvironment()
     {
-        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-        RenderSettings.ambientLight = new Color(0.52f, 0.55f, 0.58f);
+        RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+        RenderSettings.ambientSkyColor = new Color(0.50f, 0.56f, 0.64f);
+        RenderSettings.ambientEquatorColor = new Color(0.44f, 0.46f, 0.46f);
+        RenderSettings.ambientGroundColor = new Color(0.30f, 0.33f, 0.28f);
+        // 遠景だけをうっすら霞ませて奥行きを出す(近くは白飛びさせない)
+        RenderSettings.fog = true;
+        RenderSettings.fogMode = FogMode.Linear;
+        RenderSettings.fogColor = new Color(0.80f, 0.86f, 0.90f);
+        RenderSettings.fogStartDistance = 2800f;
+        RenderSettings.fogEndDistance = 8200f;
 
         var root = new GameObject("Environment");
 
@@ -53,10 +61,11 @@ public class Bootstrap : MonoBehaviour
         lightGo.transform.SetParent(root.transform, false);
         var sun = lightGo.AddComponent<Light>();
         sun.type = LightType.Directional;
-        sun.intensity = 1.15f;
-        sun.color = new Color(1f, 0.97f, 0.9f);
+        sun.intensity = 1.08f;
+        sun.color = new Color(1f, 0.96f, 0.88f);
         sun.shadows = LightShadows.Soft;
-        lightGo.transform.rotation = Quaternion.Euler(52f, -35f, 0);
+        sun.shadowStrength = 0.7f;
+        lightGo.transform.rotation = Quaternion.Euler(48f, -40f, 0);
 
         var md = new RailKit.MeshData();
         const float S = 2000f;
@@ -80,8 +89,8 @@ public class Bootstrap : MonoBehaviour
     {
         const int N = 64;
         var tex = new Texture2D(N, N, TextureFormat.RGB24, true);
-        var baseC = new Color(0.66f, 0.78f, 0.58f);
-        var lineC = new Color(0.60f, 0.72f, 0.53f);
+        var baseC = new Color(0.45f, 0.58f, 0.38f);
+        var lineC = new Color(0.38f, 0.50f, 0.33f);
         for (int y = 0; y < N; y++)
             for (int x = 0; x < N; x++)
                 tex.SetPixel(x, y, (x == 0 || y == 0) ? lineC : baseC);
