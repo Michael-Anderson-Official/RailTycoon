@@ -12,13 +12,24 @@ public static class RailKit
         public Mesh ToMesh()
         {
             var m = new Mesh();
-            if (v.Count > 65000) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            ApplyTo(m);
+            return m;
+        }
+
+        // 既存Meshを差し替える(街のように増分更新するとき用)
+        public void ApplyTo(Mesh m)
+        {
+            m.Clear();
+            m.indexFormat = v.Count > 65000
+                ? UnityEngine.Rendering.IndexFormat.UInt32
+                : UnityEngine.Rendering.IndexFormat.UInt16;
             m.SetVertices(v);
             m.SetTriangles(t, 0);
             m.RecalculateNormals();
             m.RecalculateBounds();
-            return m;
         }
+
+        public void Clear() { v.Clear(); t.Clear(); }
     }
 
     // 面ごとに頂点を分けてエッジをシャープに保つ

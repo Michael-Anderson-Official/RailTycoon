@@ -9,6 +9,7 @@ public class Bootstrap : MonoBehaviour
         Application.targetFrameRate = 60;
         QualitySettings.shadowDistance = 700f;
         BuildEnvironment();
+        CityGrid.Init();
 
         var camGo = new GameObject("Main Camera");
         var rig = camGo.AddComponent<CameraRig>();
@@ -102,4 +103,6 @@ public class Bootstrap : MonoBehaviour
             if (TrackNetwork.stations.Count > 0) SaveLoad.Save();
         }
     }
+
+    void LateUpdate() => CityGrid.FlushIfDirty();
 }

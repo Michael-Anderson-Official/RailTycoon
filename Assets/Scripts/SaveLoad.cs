@@ -135,8 +135,8 @@ public static class SaveLoad
             s.faces = sd.faces;
             s.lines = sd.lines;
             s.stationName = sd.name;
+            s.dev = sd.dev; // 発展は線路構築後にまとめて行う(線路上に建てないため)
             s.Build();
-            s.ForceDev(sd.dev);
             TrackNetwork.stations.Add(s);
             sts.Add(s);
         }
@@ -158,6 +158,9 @@ public static class SaveLoad
                 TrackNetwork.segments.Add(seg);
             }
         TrackNetwork.MarkDirty();
+
+        // 線路が揃ってから街を再構築(決定的なので駅devから同じ街が復元される)
+        foreach (var s in sts) { s.developed = 0; CityGrid.Develop(s); }
 
         if (d.tr != null)
             foreach (var td in d.tr)

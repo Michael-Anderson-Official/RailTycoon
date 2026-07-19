@@ -140,6 +140,7 @@ public class BuildController : MonoBehaviour
         st.UpdateLabel();
         TrackNetwork.stations.Add(st);
         TrackNetwork.MarkDirty();
+        st.ForceDev(0f); // 駅前に初期集落を発生させる
         SaveLoad.Save();
         UIController.Toast(st.stationName + "を建設(" + (cost / 1e8).ToString("F1") + "億円)");
     }

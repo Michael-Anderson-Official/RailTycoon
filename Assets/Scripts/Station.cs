@@ -13,10 +13,9 @@ public class Station : MonoBehaviour
     public float dev;
     public bool[] occupied;
     public readonly Dictionary<Station, int> waiting = new Dictionary<Station, int>();
+    public int developed; // CityGridが建てた棟数
     float spawnAcc;
-    int builtLevel;
     TextMesh label;
-    Transform town;
 
     public int DevLevel => (int)dev;
     public float HalfLen => StationLayout.Length(cars) * 0.5f;
@@ -91,12 +90,7 @@ public class Station : MonoBehaviour
         label.color = new Color(0.12f, 0.12f, 0.18f);
         labelGo.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
         UpdateLabel();
-
-        var townGo = new GameObject("Town");
-        townGo.transform.SetParent(transform, false);
-        town = townGo.transform;
-        builtLevel = 0;
-        SyncTownToLevel();
+        // 街はCityGridがワールドグリッド上にまとめて生成する(駅の子ではない)
     }
 
     // 線iの駅内経路(ローカル、-z端→+z端)。スロート部で駅間複線の±2.3mへ収束する
@@ -191,14 +185,14 @@ public class Station : MonoBehaviour
     public void OnDeparture(int boarded)
     {
         dev += boarded * 0.004f;
-        SyncTownToLevel();
+        if (!preview) CityGrid.Develop(this);
         UpdateLabel();
     }
 
     public void ForceDev(float d)
     {
         dev = d;
-        SyncTownToLevel();
+        if (!preview) CityGrid.Develop(this);
         UpdateLabel();
     }
 
@@ -206,38 +200,6 @@ public class Station : MonoBehaviour
     {
         if (label != null)
             label.text = stationName + "\n待" + TotalWaiting + " Lv" + DevLevel;
-    }
-
-    void SyncTownToLevel()
-    {
-        while (builtLevel < DevLevel)
-        {
-            builtLevel++;
-            SpawnBuildings(builtLevel);
-        }
-    }
-
-    void SpawnBuildings(int level)
-    {
-        var md = new RailKit.MeshData();
-        var rnd = new System.Random(stationName.GetHashCode() * 31 + level);
-        int count = 5 + level;
-        for (int i = 0; i < count; i++)
-        {
-            float ang = (float)rnd.NextDouble() * Mathf.PI * 2;
-            float rad = 45f + (float)rnd.NextDouble() * (90f + 35f * level);
-            var local = new Vector3(Mathf.Cos(ang) * rad, 0, Mathf.Sin(ang) * rad);
-            // 線路帯・ホーム上は避ける
-            if (Mathf.Abs(local.x) < layout.totalWidth * 0.5f + 12f && Mathf.Abs(local.z) < HalfLen + StationLayout.ThroatLen)
-                continue;
-            float w = 8f + (float)rnd.NextDouble() * 12f;
-            float d = 8f + (float)rnd.NextDouble() * 12f;
-            float h = 5f + (float)rnd.NextDouble() * (4f + 3.5f * level);
-            RailKit.AddBox(md, local + Vector3.up * h * 0.5f, new Vector3(w, h, d),
-                Quaternion.Euler(0, (float)rnd.NextDouble() * 90f, 0));
-        }
-        if (md.v.Count > 0)
-            RailKit.MeshGO("Town_L" + level, md.ToMesh(), MatLib.Get("Building"), town);
     }
 
     void LateUpdate()

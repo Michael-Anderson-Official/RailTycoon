@@ -32,6 +32,10 @@ public static class SceneSetup
         Mat("Canopy", Hex("5E6B77"), 0.3f, 0.4f);
         Mat("StationHouse", Hex("DAD5CA"), 0f, 0.3f);
         Mat("Building", Hex("C3BDB2"), 0f, 0.25f);
+        Mat("BuildingHigh", Hex("8FB4BC"), 0.45f, 0.72f); // 駅近の高層オフィス(ガラス)
+        Mat("BuildingMid", Hex("D8C6A2"), 0f, 0.3f);      // 中層(暖色)
+        Mat("BuildingLow", Hex("BFCE9E"), 0f, 0.25f);     // 郊外の低層住宅(緑がかり)
+        Mat("Road", Hex("41444B"), 0f, 0.2f);
         Mat("TrainBase", Color.white, 0.15f, 0.5f);
         Mat("TrainDark", Hex("26282C"), 0.2f, 0.55f);
         Mat("TrainRoof", Hex("6B7076"), 0.3f, 0.4f);

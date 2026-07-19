@@ -14,16 +14,19 @@ public static class Snapshot
         EditorSceneManager.OpenScene("Assets/Scenes/Main.unity");
         TrackNetwork.Clear();
         Bootstrap.BuildEnvironment();
+        CityGrid.Init();
 
         var stA = MakeStation(new Vector3(-600, 0, -250), 15f, 10, 2, 4, "中央");
         var stB = MakeStation(new Vector3(350, 0, 180), -25f, 6, 2, 2, "本町");
         var stC = MakeStation(new Vector3(1000, 0, -420), 55f, 4, 1, 2, "緑ヶ丘");
-        stA.ForceDev(4);
-        stB.ForceDev(2);
-        stC.ForceDev(1);
 
         var segAB = Connect(stA, stB);
         var segBC = Connect(stB, stC);
+
+        stA.ForceDev(6);
+        stB.ForceDev(3);
+        stC.ForceDev(1.5f);
+        CityGrid.FlushIfDirty();
 
         // 京王5000系10連をA→B走行中に、名鉄6000系4連をC駅停車中に配置
         PlaceTrain(TrainCatalog.Formations[0], stA, segAB, stB, 0.45f);
