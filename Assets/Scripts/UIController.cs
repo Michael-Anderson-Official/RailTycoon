@@ -103,13 +103,28 @@ public class UIController : MonoBehaviour
         {
             float sp = speeds[i];
             var b = Btn("Sp" + sp, bar.transform, "×" + sp, 24,
-                new Vector2(0.45f + 0.13f * i, 0.06f), new Vector2(0.57f + 0.13f * i, 0.48f),
+                new Vector2(0.40f + 0.12f * i, 0.06f), new Vector2(0.51f + 0.12f * i, 0.48f),
                 Vector2.zero, Vector2.zero, () => SetSpeed(sp));
             speedBtns.Add(new KeyValuePair<float, Image>(sp, b));
         }
-        Btn("Rot", bar.transform, "視点⟳", 24, new Vector2(0.85f, 0.06f), new Vector2(0.99f, 0.48f),
+        Btn("Rot", bar.transform, "視点⟳", 24, new Vector2(0.765f, 0.06f), new Vector2(0.875f, 0.48f),
             Vector2.zero, Vector2.zero, () => { if (rig != null) rig.RotateStep(); });
+        Btn("Reset", bar.transform, "初期化", 22, new Vector2(0.885f, 0.06f), new Vector2(0.995f, 0.48f),
+            Vector2.zero, Vector2.zero, OnResetTap, new Color(0.45f, 0.2f, 0.22f, 0.95f));
         SetSpeed(GameState.timeScale);
+    }
+
+    float resetArmedUntil;
+
+    void OnResetTap()
+    {
+        if (Time.unscaledTime < resetArmedUntil)
+        {
+            SaveLoad.ResetAll();
+            return;
+        }
+        resetArmedUntil = Time.unscaledTime + 3.5f;
+        Toast("全データを消して最初から始めますか?実行するならもう一度「初期化」をタップ");
     }
 
     void SetSpeed(float s)

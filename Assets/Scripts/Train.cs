@@ -33,15 +33,17 @@ public class Train : MonoBehaviour
 
     public float HalfTrain => fm.cars * StationLayout.CarLength * 0.5f;
 
-    public void Init(TrainCatalog.Formation formation, List<Station> stations, int startTrack)
+    public void Init(TrainCatalog.Formation formation, List<Station> stations, int startTrack,
+        int startIdx = 0, int dirInit = 1)
     {
         fm = formation;
         route = stations;
-        idx = 0;
+        idx = Mathf.Clamp(startIdx, 0, route.Count - 1);
+        dir = idx >= route.Count - 1 ? -1 : (idx <= 0 ? 1 : (dirInit >= 0 ? 1 : -1));
         curTrack = startTrack;
         carTs = TrainVisual.BuildCars(transform, fm);
-        // 始発駅のホームに据え付け
-        var st = route[0];
+        // 開始駅のホームに据え付け
+        var st = route[idx];
         float h = HalfTrain + 2f;
         path = RailKit.Chaikin(new List<Vector3>
         {

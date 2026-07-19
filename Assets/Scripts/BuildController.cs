@@ -140,6 +140,7 @@ public class BuildController : MonoBehaviour
         st.UpdateLabel();
         TrackNetwork.stations.Add(st);
         TrackNetwork.MarkDirty();
+        SaveLoad.Save();
         UIController.Toast(st.stationName + "を建設(" + (cost / 1e8).ToString("F1") + "億円)");
     }
 
@@ -185,6 +186,7 @@ public class BuildController : MonoBehaviour
         seg.Build(WorldRoot);
         TrackNetwork.segments.Add(seg);
         TrackNetwork.MarkDirty();
+        SaveLoad.Save();
         UIController.Toast(a.stationName + "〜" + st.stationName + " 線路敷設(" + (cost / 1e8).ToString("F1") + "億円)");
     }
 
@@ -250,6 +252,7 @@ public class BuildController : MonoBehaviour
         var go = new GameObject("Train_" + selFormation.Label);
         go.transform.SetParent(WorldRoot, false);
         go.AddComponent<Train>().Init(selFormation, new List<Station>(routeSel), track);
+        SaveLoad.Save();
         UIController.Toast(selFormation.Label + "が営業開始!");
         ClearRoute();
         if (UIController.I != null) UIController.I.UpdateRouteLabel();

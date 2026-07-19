@@ -25,8 +25,20 @@ public class Bootstrap : MonoBehaviour
         ui.rig = rig;
         ui.Build();
 
-        UIController.Toast("駅を建て、線路でつなぎ、列車を走らせよう!");
+        SaveLoad.suppress = false;
+        if (SaveLoad.Load())
+        {
+            if (TrackNetwork.stations.Count > 0)
+                rig.target = TrackNetwork.stations[0].transform.position;
+            UIController.Toast("前回の続きから再開しました(自動保存中)");
+        }
+        else
+        {
+            UIController.Toast("駅を建て、線路でつなぎ、列車を走らせよう!");
+        }
     }
+
+    float saveTimer;
 
     // 地面と光。エディタのSnapshotからも使う
     public static GameObject BuildEnvironment()
@@ -82,5 +94,12 @@ public class Bootstrap : MonoBehaviour
         float dtMin = Time.deltaTime * GameState.timeScale;
         GameState.gameMinutes += dtMin;
         foreach (var st in TrackNetwork.stations) st.Tick(dtMin);
+
+        saveTimer += Time.unscaledDeltaTime;
+        if (saveTimer >= 15f)
+        {
+            saveTimer = 0;
+            if (TrackNetwork.stations.Count > 0) SaveLoad.Save();
+        }
     }
 }
