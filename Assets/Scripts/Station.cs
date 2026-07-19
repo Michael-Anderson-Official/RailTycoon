@@ -113,6 +113,12 @@ public class Station : MonoBehaviour
     public Vector3 TrackWorldPoint(int trackIdx, float z)
         => transform.TransformPoint(new Vector3(layout.trackOffsets[trackIdx], 0, z));
 
+    // 建て替えプレビューを重ねる間、実駅のメッシュだけ隠す(コライダーは残す)
+    public void SetRenderersVisible(bool v)
+    {
+        foreach (var r in GetComponentsInChildren<Renderer>(true)) r.enabled = v;
+    }
+
     // 停車可能な番線(左→右の物理順)。UIの「N番線」はこの並び順で1始まり
     public IReadOnlyList<int> StopTracks => layout.stopTracks;
     public int PlatformCount => layout.stopTracks.Count;

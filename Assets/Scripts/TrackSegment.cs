@@ -36,7 +36,11 @@ public class TrackSegment
 
     public void Build(Transform parent)
     {
-        if (go != null) Object.Destroy(go);
+        if (go != null)
+        {
+            if (Application.isPlaying) Object.Destroy(go);
+            else Object.DestroyImmediate(go);
+        }
         go = new GameObject("Track_" + a.stationName + "_" + b.stationName);
         go.transform.SetParent(parent, false);
         var ballast = new RailKit.MeshData();

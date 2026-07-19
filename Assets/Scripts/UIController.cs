@@ -9,7 +9,9 @@ public class UIController : MonoBehaviour
     public CameraRig rig;
 
     Text moneyText, clockText, carriedText, toastText, costText, routeText, infoText, fmInfoText;
-    Text carsVal, facesVal, linesVal;
+    Text carsVal, facesVal, linesVal, stationTitle, confirmBtnLabel;
+    Station infoStation;
+    float removeArmedUntil;
     GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow;
     readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
     readonly List<KeyValuePair<TrainCatalog.Formation, Image>> fmBtns = new List<KeyValuePair<TrainCatalog.Formation, Image>>();
@@ -178,7 +180,7 @@ public class UIController : MonoBehaviour
         rt.sizeDelta = new Vector2(330, 620);
         stationPanel = p.gameObject;
         float y = -14;
-        Label("Title", p.transform, "駅を建設", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 44), new Vector2(-14, y), TextAnchor.MiddleLeft);
+        stationTitle = Label("Title", p.transform, "駅を建設", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 44), new Vector2(-14, y), TextAnchor.MiddleLeft);
         y -= 56;
         carsVal = ParamRow(p.transform, "対応両数", ref y, () => ChangeCars(-1), () => ChangeCars(1));
         facesVal = ParamRow(p.transform, "ホーム(面)", ref y, () => ChangeFaces(-1), () => ChangeFaces(1));
@@ -187,7 +189,8 @@ public class UIController : MonoBehaviour
         y -= 68;
         costText = Label("Cost", p.transform, "", 26, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 44), new Vector2(-14, y), TextAnchor.MiddleLeft);
         y -= 52;
-        Btn("Confirm", p.transform, "ここに建設", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 66), new Vector2(-14, y), () => BC.ConfirmStation(), BtnActive);
+        var confirmImg = Btn("Confirm", p.transform, "ここに建設", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 66), new Vector2(-14, y), () => BC.ConfirmStation(), BtnActive);
+        confirmBtnLabel = confirmImg.GetComponentInChildren<Text>();
         y -= 78;
         Label("Hint", p.transform, "地面をタップして位置を選択\n→「ここに建設」で確定", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 70), new Vector2(-14, y), TextAnchor.UpperLeft);
     }
@@ -301,11 +304,32 @@ public class UIController : MonoBehaviour
         var rt = p.rectTransform;
         rt.pivot = new Vector2(0.5f, 1);
         rt.anchoredPosition = new Vector2(0, -120);
-        rt.sizeDelta = new Vector2(480, 250);
+        rt.sizeDelta = new Vector2(480, 320);
         infoPanel = p.gameObject;
-        infoText = Label("Info", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(16, 60), new Vector2(-16, -12), TextAnchor.UpperLeft);
-        Btn("Close", p.transform, "閉じる", 24, new Vector2(0.3f, 0), new Vector2(0.7f, 0), new Vector2(0, 8), new Vector2(0, 54), HideStationInfo);
+        infoText = Label("Info", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(16, 128), new Vector2(-16, -12), TextAnchor.UpperLeft);
+        Btn("Rebuild", p.transform, "建て替え", 26, new Vector2(0.04f, 0), new Vector2(0.49f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRebuildTap, BtnActive);
+        Btn("Remove", p.transform, "撤去", 26, new Vector2(0.51f, 0), new Vector2(0.96f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRemoveTap, new Color(0.55f, 0.22f, 0.24f, 0.95f));
+        Btn("Close", p.transform, "閉じる", 24, new Vector2(0.3f, 0), new Vector2(0.7f, 0), new Vector2(0, 12), new Vector2(0, 60), HideStationInfo);
         infoPanel.SetActive(false);
+    }
+
+    void OnRebuildTap()
+    {
+        if (infoStation != null) BC.BeginRebuild(infoStation);
+    }
+
+    void OnRemoveTap()
+    {
+        if (infoStation == null) return;
+        if (Time.unscaledTime < removeArmedUntil)
+        {
+            var st = infoStation;
+            HideStationInfo();
+            BC.RemoveStation(st);
+            return;
+        }
+        removeArmedUntil = Time.unscaledTime + 3.5f;
+        Toast(infoStation.stationName + "を撤去しますか?接続線路と通過列車も消えます。もう一度「撤去」で確定");
     }
 
     void BuildToast()
@@ -326,6 +350,8 @@ public class UIController : MonoBehaviour
 
     public void ShowStationInfo(Station st)
     {
+        infoStation = st;
+        removeArmedUntil = 0;
         infoPanel.SetActive(true);
         infoText.text = st.stationName + "  (" + st.cars + "両対応・" + st.faces + "面" + st.lines + "線)\n"
             + "待ち客: " + st.TotalWaiting + "人 / 上限" + st.WaitingCap + "\n"
@@ -333,7 +359,11 @@ public class UIController : MonoBehaviour
             + "接続駅: " + TrackNetwork.Reachable(st).Count + "駅";
     }
 
-    public void HideStationInfo() => infoPanel.SetActive(false);
+    public void HideStationInfo()
+    {
+        infoStation = null;
+        infoPanel.SetActive(false);
+    }
 
     public void OnModeChanged()
     {
@@ -359,7 +389,23 @@ public class UIController : MonoBehaviour
             carsVal.text = BC.pCars + "両";
             facesVal.text = BC.pFaces + "面";
             linesVal.text = BC.pLines + "線";
-            costText.text = "建設費 " + (GameState.StationCost(BC.pCars, BC.pFaces, BC.pLines) / 1e8).ToString("F1") + "億円";
+            double newCost = GameState.StationCost(BC.pCars, BC.pFaces, BC.pLines);
+            var rt = BC.rebuildTarget;
+            if (rt != null)
+            {
+                stationTitle.text = "駅を建て替え";
+                confirmBtnLabel.text = "建て替え確定";
+                double delta = newCost - GameState.StationCost(rt.cars, rt.faces, rt.lines);
+                costText.text = delta > 0 ? "追加費用 " + (delta / 1e8).ToString("F1") + "億円"
+                    : delta < 0 ? "払戻 " + (-delta * 0.5 / 1e8).ToString("F1") + "億円"
+                    : "費用なし";
+            }
+            else
+            {
+                stationTitle.text = "駅を建設";
+                confirmBtnLabel.text = "ここに建設";
+                costText.text = "建設費 " + (newCost / 1e8).ToString("F1") + "億円";
+            }
         }
         if (toastBg.activeSelf && Time.unscaledTime > toastUntil) toastBg.SetActive(false);
     }

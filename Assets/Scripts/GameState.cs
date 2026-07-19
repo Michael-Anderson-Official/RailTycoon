@@ -20,6 +20,9 @@ public static class GameState
         return true;
     }
 
+    // 撤去・縮小の払い戻し
+    public static void Refund(double yen) => money += yen;
+
     public static void EarnFare(int pax, float km)
     {
         double yen = pax * (FareBase + FarePerKm * km) * FareScale;

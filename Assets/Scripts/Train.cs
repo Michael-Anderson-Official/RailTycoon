@@ -189,6 +189,66 @@ public class Train : MonoBehaviour
         return total;
     }
 
+    public bool RouteHas(Station st) => route != null && route.Contains(st);
+
+    // 撤去時の払い戻し額
+    public double RefundValue => fm.CostYen * 0.5;
+
+    // 保有中の予約(閉塞・発車駅の線・現在/到着駅の線)を全て解放。撤去前に呼ぶ
+    public void ReleaseAll()
+    {
+        if (curSeg != null) { curSeg.Leave(curSegFrom, this); curSeg = null; }
+        if (!released && departStation != null) departStation.Release(departTrack);
+        released = true;
+        if (route != null && idx >= 0 && idx < route.Count) route[idx].Release(curTrack);
+    }
+
+    // 線路網が変わった(駅の建て替え等)あと、現在(直前)駅に停車状態で復帰する。
+    // 予約を取り直し、番線を有効値へ整合する
+    public void ResyncToNetwork()
+    {
+        if (curSeg != null) { curSeg.Leave(curSegFrom, this); curSeg = null; }
+        if (!released && departStation != null) departStation.Release(departTrack);
+        released = true;
+
+        idx = Mathf.Clamp(idx, 0, route.Count - 1);
+        for (int i = 0; i < route.Count; i++)
+        {
+            int tr = (routeTracks != null && i < routeTracks.Count) ? routeTracks[i] : -1;
+            if (tr < 0 || tr >= route[i].occupied.Length || route[i].PlatformNumberOf(tr) <= 0)
+                SetRouteTrack(i, route[i].StopTracks[0]);
+        }
+        var st = route[idx];
+        int track = routeTracks[idx];
+        st.Release(track);
+        if (!st.TryReserveSpecific(track))
+        {
+            int alt;
+            if (st.TryReserve(out alt)) { track = alt; routeTracks[idx] = alt; }
+        }
+        curTrack = track;
+        float h = HalfTrain + 2f;
+        path = RailKit.Chaikin(new List<Vector3>
+        {
+            st.TrackWorldPoint(track, -h),
+            st.TrackWorldPoint(track, 0),
+            st.TrackWorldPoint(track, h),
+        }, 1);
+        cum = RailKit.Cumulative(path);
+        s = cum[cum.Length - 1];
+        v = 0;
+        PlaceCars();
+        state = St.Dwell;
+        dwellT = 6f;
+    }
+
+    void SetRouteTrack(int i, int track)
+    {
+        if (routeTracks == null) routeTracks = new List<int>();
+        while (routeTracks.Count <= i) routeTracks.Add(track);
+        routeTracks[i] = track;
+    }
+
     void PlaceCars() => PlaceCarsStatic(carTs, path, cum, s);
 
     public float SpeedKmh => v * 3.6f;

@@ -13,6 +13,7 @@ public class BuildController : MonoBehaviour
     public int pCars = 6, pFaces = 2, pLines = 2;
     public float pYaw;
     public Station previewStation;
+    public Station rebuildTarget;   // 建て替え対象(非nullなら駅モードは建て替え動作)
 
     Station trackFirst;
     GameObject trackMarker;
@@ -38,6 +39,7 @@ public class BuildController : MonoBehaviour
 
     public void SetMode(Mode m)
     {
+        if (rebuildTarget != null) { rebuildTarget.SetRenderersVisible(true); rebuildTarget = null; }
         if (previewStation != null) { Destroy(previewStation.gameObject); previewStation = null; }
         ClearTrackSel();
         ClearRoute();
@@ -74,7 +76,8 @@ public class BuildController : MonoBehaviour
                 }
                 break;
             case Mode.Station:
-                if (hasGround && tapped == null) MovePreview(ground);
+                // 建て替え中はプレビューを駅位置に固定(地面タップで動かさない)
+                if (hasGround && tapped == null && rebuildTarget == null) MovePreview(ground);
                 break;
             case Mode.Track:
                 if (tapped != null) TapTrackStation(tapped);
@@ -123,6 +126,7 @@ public class BuildController : MonoBehaviour
 
     public void ConfirmStation()
     {
+        if (rebuildTarget != null) { ConfirmRebuild(); return; }
         if (previewStation == null)
         {
             UIController.Toast("先に地面をタップして位置を選んでください");
@@ -145,6 +149,94 @@ public class BuildController : MonoBehaviour
         st.ForceDev(0f); // 駅前に初期集落を発生させる
         SaveLoad.Save();
         UIController.Toast(st.stationName + "を建設(" + (cost / 1e8).ToString("F1") + "億円)");
+    }
+
+    // ---- 駅の建て替え・撤去 ----
+
+    // 情報パネルから呼ぶ。既存駅を建て替えモードに入れ、駅パラメータをコピーして
+    // 実駅にプレビューを重ねる
+    public void BeginRebuild(Station st)
+    {
+        SetMode(Mode.Station);            // 既存プレビュー/選択をクリア
+        rebuildTarget = st;
+        pCars = st.cars; pFaces = st.faces; pLines = st.lines;
+        pYaw = st.transform.eulerAngles.y;
+        st.SetRenderersVisible(false);    // 実駅を隠してプレビューを重ねる
+        MovePreview(st.transform.position);
+        if (UIController.I != null) UIController.I.OnModeChanged();
+        UIController.Toast(st.stationName + "を建て替え中。両数/面/線を変えて「建て替え確定」");
+    }
+
+    void ConfirmRebuild()
+    {
+        var st = rebuildTarget;
+        if (st == null) return;
+        if (!RebuildStation(st, pCars, pFaces, pLines)) return; // 資金不足時は建て替えモード継続
+        rebuildTarget = null;
+        if (previewStation != null) { Destroy(previewStation.gameObject); previewStation = null; }
+        SetMode(Mode.View);
+        if (UIController.I != null) UIController.I.ShowStationInfo(st);
+    }
+
+    // 駅パラメータを変更してメッシュ・接続線路を作り直し、通過列車を再同期する
+    public bool RebuildStation(Station st, int cars, int faces, int lines)
+    {
+        double oldCost = GameState.StationCost(st.cars, st.faces, st.lines);
+        double newCost = GameState.StationCost(cars, faces, lines);
+        double delta = newCost - oldCost;
+        if (delta > 0 && !GameState.Spend(delta))
+        {
+            UIController.Toast("資金不足(差額" + (delta / 1e8).ToString("F1") + "億円必要)");
+            return false;
+        }
+        if (delta < 0) GameState.Refund(-delta * 0.5); // 縮小は差額の半分を払い戻し
+
+        st.cars = cars; st.faces = faces; st.lines = lines;
+        st.Build();                         // メッシュ・レイアウト・occupied再生成
+        st.SetRenderersVisible(true);
+
+        // 接続する線路は駅端(End)が動くので作り直す
+        foreach (var seg in TrackNetwork.segments)
+            if (seg.a == st || seg.b == st) seg.Build(WorldRoot);
+
+        // この駅を通る列車を現在駅に復帰(予約取り直し・番線整合)
+        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+            if (t.RouteHas(st)) t.ResyncToNetwork();
+
+        TrackNetwork.MarkDirty();
+        SaveLoad.Save();
+        UIController.Toast(st.stationName + "を建て替え(" + cars + "両" + faces + "面" + lines + "線)");
+        return true;
+    }
+
+    // 駅を撤去。接続線路と通過列車も消し、半額を払い戻す
+    public void RemoveStation(Station st)
+    {
+        double refund = GameState.StationCost(st.cars, st.faces, st.lines) * 0.5;
+        int removedTrains = 0;
+        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+        {
+            if (!t.RouteHas(st)) continue;
+            refund += t.RefundValue;
+            removedTrains++;
+            t.ReleaseAll();               // 隣駅などに残る予約を解放してから破棄
+            DestroySafe(t.gameObject);
+        }
+        for (int i = TrackNetwork.segments.Count - 1; i >= 0; i--)
+        {
+            var seg = TrackNetwork.segments[i];
+            if (seg.a != st && seg.b != st) continue;
+            refund += seg.length * GameState.TrackCostPerM * 0.5;
+            if (seg.go != null) DestroySafe(seg.go);
+            TrackNetwork.segments.RemoveAt(i);
+        }
+        TrackNetwork.stations.Remove(st);
+        DestroySafe(st.gameObject);
+        GameState.Refund(refund);
+        TrackNetwork.MarkDirty();
+        SaveLoad.Save();
+        UIController.Toast(st.stationName + "を撤去(払戻 " + (refund / 1e8).ToString("F1") + "億円"
+            + (removedTrains > 0 ? "・列車" + removedTrains + "本撤去" : "") + ")");
     }
 
     // ---- 線路 ----
@@ -295,6 +387,14 @@ public class BuildController : MonoBehaviour
     }
 
     // ---- 共通 ----
+
+    // 再生中はDestroy、エディタ(バッチテスト)ではDestroyImmediate
+    static void DestroySafe(Object o)
+    {
+        if (o == null) return;
+        if (Application.isPlaying) Destroy(o);
+        else DestroyImmediate(o);
+    }
 
     static GameObject MakeMarker(Vector3 pos, float radius, Color c)
     {
