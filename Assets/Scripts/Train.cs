@@ -23,12 +23,13 @@ public class Train : MonoBehaviour
     int departTrack;
     float releaseS;
     bool released;
+    TrackSegment curSeg;      // 走行中の閉塞区間
+    Station curSegFrom;
 
     List<Transform> carTs;
     readonly List<(Station dest, int count, Vector3 boardPos)> onboard = new List<(Station, int, Vector3)>();
     int onboardCount;
 
-    const float Accel = 0.9f, Decel = 1.0f;
     const float CarGap = 0.7f;
 
     public float HalfTrain => fm.cars * StationLayout.CarLength * 0.5f;
@@ -70,9 +71,9 @@ public class Train : MonoBehaviour
         {
             float total = cum[cum.Length - 1];
             float rem = Mathf.Max(0, total - s);
-            float vAllow = Mathf.Sqrt(2f * Decel * rem);
+            float vAllow = Mathf.Sqrt(2f * fm.type.Decel * rem);
             float vmax = fm.type.maxSpeedKmh / 3.6f;
-            v = Mathf.Min(v + Accel * dt, vmax, vAllow);
+            v = Mathf.Min(v + fm.type.Accel * dt, vmax, vAllow);
             s += v * dt;
             if (!released && s > releaseS)
             {
@@ -100,14 +101,21 @@ public class Train : MonoBehaviour
         var to = route[next];
         var seg = TrackNetwork.Find(cur, to);
         if (seg == null) { dwellT = 5f; return; }
+        int exitSign = seg.SignAt(cur);
+        int enterSign = seg.SignAt(to);
+        // 到着駅は進行方向左側のホーム線を優先確保。満線なら発車を待つ
         int destTrack;
-        if (!to.TryReserve(out destTrack)) { dwellT = 3f; return; } // 到着線が空くまで待つ
+        if (!to.TryReserveFor(enterSign, out destTrack)) { dwellT = 3f; return; }
+        // 閉塞: 同一方向の駅間に先行列車がいる間は出発できない
+        if (!seg.TryEnter(cur, this))
+        {
+            to.Release(destTrack);
+            dwellT = 3f;
+            return;
+        }
 
         int boarded = Board(cur);
         cur.OnDeparture(boarded);
-
-        int exitSign = seg.SignAt(cur);
-        int enterSign = seg.SignAt(to);
         path = BuildLeg(cur, curTrack, exitSign, to, destTrack, enterSign, HalfTrain);
         cum = RailKit.Cumulative(path);
         // 経路先頭は列車の尻尾位置。先頭車はそこから編成長ぶん先にいる
@@ -117,6 +125,8 @@ public class Train : MonoBehaviour
         departTrack = curTrack;
         released = false;
         releaseS = cur.HalfLen + StationLayout.ThroatLen + fm.cars * StationLayout.CarLength + 10f;
+        curSeg = seg;
+        curSegFrom = cur;
         curTrack = destTrack;
         idx = next;
         state = St.Run;
@@ -125,6 +135,11 @@ public class Train : MonoBehaviour
     void Arrive()
     {
         if (!released) { released = true; departStation.Release(departTrack); }
+        if (curSeg != null)
+        {
+            curSeg.Leave(curSegFrom, this); // 閉塞解放
+            curSeg = null;
+        }
         var st = route[idx];
         // 降車と運賃収受
         int off = 0;
@@ -166,6 +181,26 @@ public class Train : MonoBehaviour
     }
 
     void PlaceCars() => PlaceCarsStatic(carTs, path, cum, s);
+
+    public float SpeedKmh => v * 3.6f;
+
+    // 前面展望カメラ用: 先頭車前端の位置と進行方向
+    public void CabPose(out Vector3 pos, out Vector3 fwd)
+    {
+        if (path == null || cum == null)
+        {
+            pos = transform.position + Vector3.up * 3f;
+            fwd = Vector3.forward;
+            return;
+        }
+        Vector3 pf, pr, f;
+        RailKit.Sample(path, cum, s, out pf, out f);
+        RailKit.Sample(path, cum, s - 4f, out pr, out f);
+        fwd = pf - pr;
+        if (fwd.sqrMagnitude < 1e-6f) fwd = f;
+        fwd.Normalize();
+        pos = pf + Vector3.up * 2.7f;
+    }
 
     // エディタのSnapshotでも使う車両配置(先頭車の弧長sから後方へ並べる)
     public static void PlaceCarsStatic(List<Transform> cars, List<Vector3> path, float[] cum, float s)

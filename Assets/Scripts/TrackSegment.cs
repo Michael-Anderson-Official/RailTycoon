@@ -9,11 +9,30 @@ public class TrackSegment
     public GameObject go;
     public float length;
 
+    // 閉塞: 駅間を1閉塞とし、同一方向には1列車しか入れない([0]=a→b、[1]=b→a)
+    readonly Train[] occupant = new Train[2];
+
     public Vector3 EndA => a.End(signA);
     public Vector3 EndB => b.End(signB);
 
     public int SignAt(Station s) => s == a ? signA : signB;
     public Station Other(Station s) => s == a ? b : a;
+
+    int DirIndex(Station from) => from == a ? 0 : 1;
+
+    public bool TryEnter(Station from, Train t)
+    {
+        int i = DirIndex(from);
+        if (occupant[i] != null && occupant[i] != t) return false;
+        occupant[i] = t;
+        return true;
+    }
+
+    public void Leave(Station from, Train t)
+    {
+        int i = DirIndex(from);
+        if (occupant[i] == t) occupant[i] = null;
+    }
 
     public void Build(Transform parent)
     {

@@ -134,6 +134,24 @@ public class Station : MonoBehaviour
         return false;
     }
 
+    // 進行方向左側のホーム線を優先して確保(左側通行)。
+    // enterSign: 進入してくる駅端の符号。駅内の進行方向はローカル-enterSign*zなので
+    // 左側の線はローカルx符号がenterSignと一致する側
+    public bool TryReserveFor(int enterSign, out int trackIdx)
+    {
+        foreach (int i in layout.stopTracks)
+        {
+            if (occupied[i]) continue;
+            if (Mathf.Sign(layout.trackOffsets[i]) == enterSign)
+            {
+                occupied[i] = true;
+                trackIdx = i;
+                return true;
+            }
+        }
+        return TryReserve(out trackIdx); // 左側が塞がっていれば空いている線へ
+    }
+
     public void Release(int trackIdx)
     {
         if (trackIdx >= 0 && trackIdx < occupied.Length) occupied[trackIdx] = false;

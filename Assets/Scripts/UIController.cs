@@ -141,11 +141,32 @@ public class UIController : MonoBehaviour
         for (int i = 0; i < 4; i++)
         {
             var m = modes[i];
-            var img = Btn("M" + names[i], bar.transform, names[i], 32,
-                new Vector2(i * 0.25f + 0.006f, 0.08f), new Vector2((i + 1) * 0.25f - 0.006f, 0.92f),
+            var img = Btn("M" + names[i], bar.transform, names[i], 30,
+                new Vector2(i * 0.2f + 0.005f, 0.08f), new Vector2((i + 1) * 0.2f - 0.005f, 0.92f),
                 Vector2.zero, Vector2.zero, () => BC.SetMode(m));
             modeBtns[m] = img;
         }
+        cabBtn = Btn("MCab", bar.transform, "展望", 30,
+            new Vector2(0.805f, 0.08f), new Vector2(0.995f, 0.92f),
+            Vector2.zero, Vector2.zero, OnCabTap);
+    }
+
+    Image cabBtn;
+    int cabIdx;
+
+    void OnCabTap()
+    {
+        var trains = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
+        if (trains.Length == 0)
+        {
+            Toast("列車がいません。先に「列車」モードで走らせてください");
+            return;
+        }
+        cabIdx = rig.cabTrain == null ? 0 : (cabIdx + 1) % trains.Length;
+        rig.EnterCab(trains[cabIdx]);
+        cabBtn.color = BtnActive;
+        Toast("前面展望: " + trains[cabIdx].fm.Label +
+            (trains.Length > 1 ? "(もう一度タップで次の列車、" : "(") + "「見る」で戻る)");
     }
 
     void BuildStationPanel()
@@ -281,6 +302,8 @@ public class UIController : MonoBehaviour
 
     public void OnModeChanged()
     {
+        if (rig != null) rig.ExitCab();
+        if (cabBtn != null) cabBtn.color = BtnBg;
         var mode = BC.mode;
         foreach (var kv in modeBtns) kv.Value.color = kv.Key == mode ? BtnActive : BtnBg;
         stationPanel.SetActive(mode == BuildController.Mode.Station);
@@ -292,7 +315,9 @@ public class UIController : MonoBehaviour
     void Update()
     {
         moneyText.text = "資金 " + GameState.MoneyLabel;
-        clockText.text = GameState.ClockLabel;
+        clockText.text = rig != null && rig.cabTrain != null
+            ? GameState.ClockLabel + "  " + rig.cabTrain.SpeedKmh.ToString("F0") + "km/h"
+            : GameState.ClockLabel;
         carriedText.text = "輸送人員 " + GameState.carried + "人";
         if (stationPanel.activeSelf)
         {

@@ -21,6 +21,19 @@ public class CameraRig : MonoBehaviour
 
     public Camera Cam => cam;
 
+    // 前面展望モード(nullで通常視点)
+    public Train cabTrain;
+    Quaternion cabRot = Quaternion.identity;
+
+    public void EnterCab(Train t)
+    {
+        cabTrain = t;
+        t.CabPose(out var p, out var f);
+        cabRot = Quaternion.LookRotation(f, Vector3.up);
+    }
+
+    public void ExitCab() => cabTrain = null;
+
     public void Setup()
     {
         cam = gameObject.GetComponent<Camera>();
@@ -35,6 +48,15 @@ public class CameraRig : MonoBehaviour
 
     void Update()
     {
+        if (cabTrain != null)
+        {
+            // 前面展望: 先頭車前端に追従(ポリラインの角で揺れないよう回転は補間)
+            cabTrain.CabPose(out var p, out var f);
+            var look = Quaternion.LookRotation((f + Vector3.down * 0.06f).normalized, Vector3.up);
+            cabRot = Quaternion.Slerp(cabRot, look, 1f - Mathf.Exp(-6f * Time.deltaTime));
+            transform.SetPositionAndRotation(p, cabRot);
+            return;
+        }
         if (Input.touchCount > 0) HandleTouch();
         else HandleMouse();
         Apply();
