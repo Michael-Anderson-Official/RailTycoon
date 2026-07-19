@@ -1,0 +1,278 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+// 建設・選択のモード管理とタップ処理
+public class BuildController : MonoBehaviour
+{
+    public static BuildController Instance;
+
+    public enum Mode { View, Track, Station, Train }
+    public Mode mode = Mode.View;
+
+    // 駅建設パラメータ
+    public int pCars = 6, pFaces = 2, pLines = 2;
+    public float pYaw;
+    public Station previewStation;
+
+    Station trackFirst;
+    GameObject trackMarker;
+
+    public TrainCatalog.Formation selFormation;
+    public readonly List<Station> routeSel = new List<Station>();
+    readonly List<GameObject> routeMarkers = new List<GameObject>();
+
+    static Transform worldRoot;
+
+    public static Transform WorldRoot
+    {
+        get
+        {
+            if (worldRoot == null) worldRoot = new GameObject("World").transform;
+            return worldRoot;
+        }
+    }
+
+    void Awake() => Instance = this;
+
+    public void SetMode(Mode m)
+    {
+        if (previewStation != null) { Destroy(previewStation.gameObject); previewStation = null; }
+        ClearTrackSel();
+        ClearRoute();
+        mode = m;
+        if (UIController.I != null) UIController.I.OnModeChanged();
+    }
+
+    public void HandleTap(Ray ray)
+    {
+        Station tapped = null;
+        RaycastHit hit;
+        if (Physics.Raycast(ray, out hit, 20000f))
+            tapped = hit.collider.GetComponentInParent<Station>();
+        if (tapped != null && tapped.preview) tapped = null;
+
+        Vector3 ground = Vector3.zero;
+        bool hasGround = false;
+        if (Mathf.Abs(ray.direction.y) > 1e-4f)
+        {
+            float t = -ray.origin.y / ray.direction.y;
+            if (t > 0) { ground = ray.origin + ray.direction * t; hasGround = true; }
+        }
+
+        switch (mode)
+        {
+            case Mode.View:
+                if (UIController.I != null)
+                {
+                    if (tapped != null) UIController.I.ShowStationInfo(tapped);
+                    else UIController.I.HideStationInfo();
+                }
+                break;
+            case Mode.Station:
+                if (hasGround && tapped == null) MovePreview(ground);
+                break;
+            case Mode.Track:
+                if (tapped != null) TapTrackStation(tapped);
+                else ClearTrackSel();
+                break;
+            case Mode.Train:
+                if (tapped != null) TapRouteStation(tapped);
+                break;
+        }
+    }
+
+    // ---- 駅建設 ----
+
+    void MovePreview(Vector3 pos)
+    {
+        pos = new Vector3(Mathf.Round(pos.x / 5f) * 5f, 0, Mathf.Round(pos.z / 5f) * 5f);
+        if (previewStation == null)
+        {
+            var go = new GameObject("StationPreview");
+            go.transform.SetParent(WorldRoot, false);
+            previewStation = go.AddComponent<Station>();
+            previewStation.preview = true;
+            previewStation.stationName = "(建設予定)";
+        }
+        previewStation.transform.SetPositionAndRotation(pos, Quaternion.Euler(0, pYaw, 0));
+        ApplyPreviewParams();
+    }
+
+    public void ApplyPreviewParams()
+    {
+        if (previewStation == null) return;
+        previewStation.cars = pCars;
+        previewStation.faces = pFaces;
+        previewStation.lines = pLines;
+        previewStation.transform.rotation = Quaternion.Euler(0, pYaw, 0);
+        previewStation.Build();
+    }
+
+    public void ConfirmStation()
+    {
+        if (previewStation == null)
+        {
+            UIController.Toast("先に地面をタップして位置を選んでください");
+            return;
+        }
+        double cost = GameState.StationCost(pCars, pFaces, pLines);
+        if (!GameState.Spend(cost))
+        {
+            UIController.Toast("資金不足(" + (cost / 1e8).ToString("F1") + "億円必要)");
+            return;
+        }
+        var st = previewStation;
+        previewStation = null;
+        st.preview = false;
+        st.stationName = "駅" + (++TrackNetwork.nameCounter);
+        st.gameObject.name = st.stationName;
+        st.UpdateLabel();
+        TrackNetwork.stations.Add(st);
+        TrackNetwork.MarkDirty();
+        UIController.Toast(st.stationName + "を建設(" + (cost / 1e8).ToString("F1") + "億円)");
+    }
+
+    // ---- 線路 ----
+
+    void TapTrackStation(Station st)
+    {
+        if (trackFirst == null)
+        {
+            trackFirst = st;
+            trackMarker = MakeMarker(st.transform.position, 30f, new Color(1f, 0.85f, 0.2f, 0.5f));
+            UIController.Toast(st.stationName + "を選択。接続先の駅をタップ");
+            return;
+        }
+        if (trackFirst == st) { ClearTrackSel(); return; }
+        var a = trackFirst;
+        ClearTrackSel();
+        if (TrackNetwork.Connected(a, st))
+        {
+            UIController.Toast("すでに接続されています");
+            return;
+        }
+        int bestSa = 1, bestSb = 1;
+        float best = float.MaxValue;
+        for (int sa = -1; sa <= 1; sa += 2)
+            for (int sb = -1; sb <= 1; sb += 2)
+            {
+                float d = Vector3.Distance(a.End(sa), st.End(sb));
+                if (d < best) { best = d; bestSa = sa; bestSb = sb; }
+            }
+        if (best < 50f)
+        {
+            UIController.Toast("駅同士が近すぎます");
+            return;
+        }
+        double cost = best * GameState.TrackCostPerM;
+        if (!GameState.Spend(cost))
+        {
+            UIController.Toast("資金不足(" + (cost / 1e8).ToString("F1") + "億円必要)");
+            return;
+        }
+        var seg = new TrackSegment { a = a, b = st, signA = bestSa, signB = bestSb };
+        seg.Build(WorldRoot);
+        TrackNetwork.segments.Add(seg);
+        TrackNetwork.MarkDirty();
+        UIController.Toast(a.stationName + "〜" + st.stationName + " 線路敷設(" + (cost / 1e8).ToString("F1") + "億円)");
+    }
+
+    void ClearTrackSel()
+    {
+        trackFirst = null;
+        if (trackMarker != null) { Destroy(trackMarker); trackMarker = null; }
+    }
+
+    // ---- 列車 ----
+
+    void TapRouteStation(Station st)
+    {
+        if (selFormation == null)
+        {
+            UIController.Toast("先に編成を選んでください");
+            return;
+        }
+        if (st.cars < selFormation.cars)
+        {
+            UIController.Toast(st.stationName + "は" + st.cars + "両対応。" + selFormation.cars + "両は停車できません");
+            return;
+        }
+        if (routeSel.Count > 0)
+        {
+            var last = routeSel[routeSel.Count - 1];
+            if (last == st) return;
+            if (routeSel.Contains(st))
+            {
+                UIController.Toast("すでに経路に含まれています");
+                return;
+            }
+            if (!TrackNetwork.Connected(last, st))
+            {
+                UIController.Toast(last.stationName + "と直結する線路がありません");
+                return;
+            }
+        }
+        routeSel.Add(st);
+        routeMarkers.Add(MakeMarker(st.transform.position, 26f, new Color(0.2f, 0.8f, 1f, 0.5f)));
+        if (UIController.I != null) UIController.I.UpdateRouteLabel();
+    }
+
+    public void LaunchTrain()
+    {
+        if (selFormation == null || routeSel.Count < 2)
+        {
+            UIController.Toast("編成を選び、駅を2つ以上タップしてください");
+            return;
+        }
+        int track;
+        if (!routeSel[0].TryReserve(out track))
+        {
+            UIController.Toast(routeSel[0].stationName + "の線が空いていません");
+            return;
+        }
+        if (!GameState.Spend(selFormation.CostYen))
+        {
+            routeSel[0].Release(track);
+            UIController.Toast("資金不足(" + (selFormation.CostYen / 1e8).ToString("F1") + "億円必要)");
+            return;
+        }
+        var go = new GameObject("Train_" + selFormation.Label);
+        go.transform.SetParent(WorldRoot, false);
+        go.AddComponent<Train>().Init(selFormation, new List<Station>(routeSel), track);
+        UIController.Toast(selFormation.Label + "が営業開始!");
+        ClearRoute();
+        if (UIController.I != null) UIController.I.UpdateRouteLabel();
+    }
+
+    public void ClearRoute()
+    {
+        routeSel.Clear();
+        foreach (var m in routeMarkers) if (m != null) Destroy(m);
+        routeMarkers.Clear();
+        if (UIController.I != null) UIController.I.UpdateRouteLabel();
+    }
+
+    // ---- 共通 ----
+
+    static GameObject MakeMarker(Vector3 pos, float radius, Color c)
+    {
+        var md = new RailKit.MeshData();
+        const int N = 28;
+        int b = md.v.Count;
+        md.v.Add(Vector3.zero);
+        for (int i = 0; i <= N; i++)
+        {
+            float a = i / (float)N * Mathf.PI * 2f;
+            md.v.Add(new Vector3(Mathf.Cos(a) * radius, 0, Mathf.Sin(a) * radius));
+        }
+        for (int i = 1; i <= N; i++)
+        {
+            md.t.Add(b);
+            md.t.Add(b + i + 1);
+            md.t.Add(b + i);
+        }
+        var go = RailKit.MeshGO("Marker", md.ToMesh(), MatLib.Tinted("Marker", c), WorldRoot);
+        go.transform.position = pos + Vector3.up * 1.6f;
+        return go;
+    }
+}

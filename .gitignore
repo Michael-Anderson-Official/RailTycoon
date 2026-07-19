@@ -1,0 +1,11 @@
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+Snapshots/
+*.csproj
+*.sln
+Assets/Resources/PerformanceTestRun*.json*
+Assets/Resources/PerformanceTestRun*
