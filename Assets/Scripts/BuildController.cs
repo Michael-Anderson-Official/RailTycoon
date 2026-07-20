@@ -320,8 +320,10 @@ public class BuildController : MonoBehaviour
                 return;
             }
         }
-        // 駅を選んだら番線選択待ちにする。UIが番線ボタンを出す
+        // 駅を選んだら番線選択待ちにする。UIが番線ボタンを、駅側が3D番線ラベルを出す
+        if (pendingStation != null && pendingStation != st) pendingStation.HidePlatformNumbers();
         pendingStation = st;
+        st.ShowPlatformNumbers();
         if (UIController.I != null) UIController.I.ShowPlatformPicker(st);
         UIController.Toast(st.stationName + "の番線を選んでください(全" + st.PlatformCount + "番線)");
     }
@@ -335,6 +337,7 @@ public class BuildController : MonoBehaviour
         routeSel.Add(st);
         routeTrackSel.Add(track);
         routeMarkers.Add(MakeMarker(st.transform.position, 26f, new Color(0.2f, 0.8f, 1f, 0.5f)));
+        st.HidePlatformNumbers();
         pendingStation = null;
         if (UIController.I != null)
         {
@@ -376,6 +379,7 @@ public class BuildController : MonoBehaviour
     {
         routeSel.Clear();
         routeTrackSel.Clear();
+        if (pendingStation != null) pendingStation.HidePlatformNumbers();
         pendingStation = null;
         foreach (var m in routeMarkers) if (m != null) Destroy(m);
         routeMarkers.Clear();

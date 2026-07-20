@@ -16,6 +16,7 @@ public class Station : MonoBehaviour
     public int developed; // CityGridが建てた棟数
     float spawnAcc;
     TextMesh label;
+    readonly List<GameObject> platformLabels = new List<GameObject>(); // 番線選択中に各停車線へ浮かべる番号
 
     public int DevLevel => (int)dev;
     public float HalfLen => StationLayout.Length(cars) * 0.5f;
@@ -133,6 +134,37 @@ public class Station : MonoBehaviour
         return (i >= 0 && i < layout.stopTracks.Count) ? layout.stopTracks[i] : layout.stopTracks[0];
     }
 
+    // 番線選択中、各停車線の上に「N番線」ラベルを浮かべる(UIの番線ボタンと物理対応させる)
+    public void ShowPlatformNumbers()
+    {
+        HidePlatformNumbers();
+        for (int k = 0; k < layout.stopTracks.Count; k++)
+        {
+            int trk = layout.stopTracks[k];
+            // 停車線ごとにz位置を少しずらして重なりを避ける(番線が多いほど前後に散らす)
+            float zStagger = (k - (layout.stopTracks.Count - 1) * 0.5f) * (StationLayout.CarLength * 1.1f);
+            var go = new GameObject("PFNum" + (k + 1));
+            go.transform.SetParent(transform, false);
+            go.transform.position = TrackWorldPoint(trk, zStagger) + Vector3.up * 12f;
+            var tm = go.AddComponent<TextMesh>();
+            tm.font = MatLib.JpFont;
+            tm.text = (k + 1) + "番線";
+            tm.fontSize = 64;
+            tm.characterSize = 1.3f;
+            tm.anchor = TextAnchor.LowerCenter;
+            tm.alignment = TextAlignment.Center;
+            tm.color = new Color(1f, 0.74f, 0.1f);
+            go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
+            platformLabels.Add(go);
+        }
+    }
+
+    public void HidePlatformNumbers()
+    {
+        foreach (var g in platformLabels) if (g != null) DestroyImmediateSafe(g);
+        platformLabels.Clear();
+    }
+
     public bool TryReserve(out int trackIdx)
     {
         foreach (int i in layout.stopTracks)
@@ -233,11 +265,12 @@ public class Station : MonoBehaviour
 
     void LateUpdate()
     {
-        if (label != null && Camera.main != null)
-        {
-            var fwd = Camera.main.transform.forward;
-            label.transform.rotation = Quaternion.LookRotation(new Vector3(fwd.x, fwd.y, fwd.z));
-        }
+        if (Camera.main == null) return;
+        var fwd = Camera.main.transform.forward;
+        var rot = Quaternion.LookRotation(new Vector3(fwd.x, fwd.y, fwd.z));
+        if (label != null) label.transform.rotation = rot;
+        for (int i = 0; i < platformLabels.Count; i++)
+            if (platformLabels[i] != null) platformLabels[i].transform.rotation = rot;
     }
 
     static void DestroyImmediateSafe(GameObject go)
