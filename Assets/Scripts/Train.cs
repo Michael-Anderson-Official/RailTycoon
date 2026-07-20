@@ -281,7 +281,9 @@ public class Train : MonoBehaviour
         fwd = pf - pr;
         if (fwd.sqrMagnitude < 1e-6f) fwd = f;
         fwd.Normalize();
-        pos = pf + Vector3.up * 2.7f;
+        // 前面ガラスは車体先端より前へ張り出すので、鼻先より少し前・運転席高さに置く
+        // (pfのままだと赤い前面の内側に入り画面が真っ赤になる)
+        pos = pf + fwd * 2.2f + Vector3.up * 2.9f;
     }
 
     // エディタのSnapshotでも使う車両配置(先頭車の弧長sから後方へ並べる)

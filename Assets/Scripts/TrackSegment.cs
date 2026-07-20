@@ -49,10 +49,27 @@ public class TrackSegment
         var center = CenterPoints();
         RailKit.AddTrack(ballast, rail, tie, RailKit.Offset(center, 2.3f));
         RailKit.AddTrack(ballast, rail, tie, RailKit.Offset(center, -2.3f));
+
+        // 直線複線上に両渡り線(シザースクロッシング)を置く。駅寄りの直線区間へ
+        length = Vector3.Distance(EndA, EndB);
+        var swMetal = new RailKit.MeshData();
+        var swBox = new RailKit.MeshData();
+        var dir = (EndB - EndA).normalized;
+        if (length > 95f)
+        {
+            RailKit.AddCrossover(rail, swMetal, swBox, tie, ballast, EndA + dir * 30f, dir);
+            RailKit.AddCrossover(rail, swMetal, swBox, tie, ballast, EndB - dir * 30f, dir);
+        }
+        else if (length > 46f)
+        {
+            RailKit.AddCrossover(rail, swMetal, swBox, tie, ballast, (EndA + EndB) * 0.5f, dir);
+        }
+
         RailKit.MeshGO("Ballast", ballast.ToMesh(), MatLib.Get("Ballast"), go.transform);
         RailKit.MeshGO("Rail", rail.ToMesh(), MatLib.Get("Rail"), go.transform);
         RailKit.MeshGO("Tie", tie.ToMesh(), MatLib.Get("Tie"), go.transform);
-        length = Vector3.Distance(EndA, EndB);
+        RailKit.MeshGO("Switch", swMetal.ToMesh(), MatLib.Get("Switch"), go.transform);
+        RailKit.MeshGO("SwitchBox", swBox.ToMesh(), MatLib.Get("SwitchBox"), go.transform);
     }
 
     // A端→B端の中心線(80m刻み)

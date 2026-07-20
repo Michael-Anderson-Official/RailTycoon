@@ -178,6 +178,83 @@ public static class RailKit
         AddSlab(rail, Offset(center, -Gauge), 0.075f, RailTop - 0.13f, 0.05f);
     }
 
+    // 両渡り線(シザースクロッシング)を直線の複線上に描く。centerを中心、dir=線路方向。
+    // 左右トラックは center±perp*2.3。直進本線レール+交差2本(中央ダイヤモンドクロッシング)+
+    // 各分岐のフログ・トングレール・ガードレール・転てつ機・長い分岐枕木・バラスト。
+    public static void AddCrossover(MeshData rail, MeshData metal, MeshData box, MeshData tie,
+        MeshData ballast, Vector3 center, Vector3 dir)
+    {
+        dir.y = 0;
+        if (dir.sqrMagnitude < 1e-4f) return;
+        dir.Normalize();
+        var perp = Vector3.Cross(Vector3.up, dir).normalized;
+        const float g = Gauge, ry = RailTop, half = 2.3f, d = 10f;
+        var up = Vector3.up;
+
+        // バラスト
+        var cp = new List<Vector3> { center - dir * (d + 3f), center + dir * (d + 3f) };
+        AddSlab(ballast, cp, 3.7f, 0.36f, 0.16f);
+        // 分岐枕木(線路方向に直交・中央ほど長い)
+        var tieRot = Quaternion.LookRotation(perp, up);
+        int nT = Mathf.Max(4, Mathf.CeilToInt(d * 2 / TieSpacing));
+        for (int i = 0; i <= nT; i++)
+        {
+            float tt = i / (float)nT;
+            var p = Vector3.Lerp(center - dir * d, center + dir * d, tt);
+            float w = Mathf.Lerp(5.4f, 7.0f, 1f - Mathf.Abs(tt - 0.5f) * 2f);
+            AddBox(tie, p + up * 0.34f, new Vector3(0.26f, 0.17f, w), tieRot);
+        }
+        // 直進本線レール(両トラック)
+        var rot = Quaternion.LookRotation(dir, up);
+        for (int s = -1; s <= 1; s += 2)
+        {
+            var tc = center + perp * (half * s);
+            AddBox(rail, tc + perp * g + up * ry, new Vector3(0.09f, 0.16f, (d + 4f) * 2f), rot);
+            AddBox(rail, tc - perp * g + up * ry, new Vector3(0.09f, 0.16f, (d + 4f) * 2f), rot);
+        }
+        // 交差する2本の渡り線 → 中央ダイヤモンドクロッシングX
+        var A1 = center - perp * half - dir * d; var B1 = center + perp * half + dir * d;
+        var A2 = center + perp * half - dir * d; var B2 = center - perp * half + dir * d;
+        DiagRail(rail, A1, B1, g, ry);
+        DiagRail(rail, A2, B2, g, ry);
+        AddBox(metal, center + up * (ry - 0.02f), new Vector3(1.5f, 0.2f, 1.5f), rot);
+        // 4分岐(転てつ機は本線の外側へ。左本線A1/B2は-perp、右本線A2/B1は+perp側)
+        CrossPoint(metal, box, A1, dir, perp, -1, g, ry);
+        CrossPoint(metal, box, B2, dir, perp, -1, g, ry);
+        CrossPoint(metal, box, A2, dir, perp, +1, g, ry);
+        CrossPoint(metal, box, B1, dir, perp, +1, g, ry);
+    }
+
+    static void DiagRail(MeshData rail, Vector3 a, Vector3 b, float g, float ry)
+    {
+        var dd = b - a; dd.y = 0; float len = dd.magnitude;
+        if (len < 0.1f) return;
+        dd /= len;
+        var pp = Vector3.Cross(Vector3.up, dd).normalized;
+        var rot = Quaternion.LookRotation(dd, Vector3.up);
+        var mid = (a + b) * 0.5f + Vector3.up * ry;
+        AddBox(rail, mid + pp * g, new Vector3(0.09f, 0.16f, len), rot);
+        AddBox(rail, mid - pp * g, new Vector3(0.09f, 0.16f, len), rot);
+    }
+
+    // 分岐1か所: トングレール(可動)・フログ・ガードレール・転てつ機。at=本線側の分岐点
+    static void CrossPoint(MeshData metal, MeshData box, Vector3 at, Vector3 dir, Vector3 perp, int outSide, float g, float ry)
+    {
+        var rot = Quaternion.LookRotation(dir, Vector3.up);
+        var up = Vector3.up;
+        AddBox(metal, at - perp * (outSide * g) + up * ry, new Vector3(0.1f, 0.15f, 5.5f), rot);        // トングレール
+        AddBox(metal, at + up * (ry - 0.02f), new Vector3(0.55f, 0.2f, 1.6f), rot);                     // フログ
+        AddBox(metal, at - perp * (outSide * (g - 0.2f)) + up * ry, new Vector3(0.08f, 0.15f, 3.2f), rot); // ガードレール(内側)
+        var mach = at + perp * (2.9f * outSide);
+        AddBox(box, mach + up * 0.42f, new Vector3(0.9f, 0.72f, 1.3f), rot);
+        AddBox(metal, mach + up * 0.95f, new Vector3(0.14f, 0.5f, 0.14f), rot * Quaternion.Euler(0, 0, 22f));
+        var rodEnd = at + perp * (0.9f * outSide);
+        var rdir = rodEnd - mach; rdir.y = 0;
+        if (rdir.magnitude > 0.1f)
+            AddBox(metal, (mach + rodEnd) * 0.5f + up * 0.34f, new Vector3(0.08f, 0.08f, rdir.magnitude),
+                Quaternion.LookRotation(rdir.normalized, Vector3.up));
+    }
+
     public static float[] Cumulative(List<Vector3> pts)
     {
         var c = new float[pts.Count];
