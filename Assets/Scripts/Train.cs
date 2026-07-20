@@ -8,6 +8,7 @@ public class Train : MonoBehaviour
     public TrainCatalog.Formation fm;
     public List<Station> route;
     public List<int> routeTracks; // 各停車駅で入る番線(trackIdx)。routeと同じ長さ
+    public int lineId = -1;       // 配属先の運行系統ID(-1=無所属)
 
     public int idx;      // 現在(または直前に発った)駅のindex
     public int dir = 1;  // 進行方向(route上)

@@ -31,6 +31,16 @@ public static class SaveLoad
         public int[] route;
         public int[] tracks;
         public int idx, dir;
+        public int lineId = -1;
+    }
+
+    [Serializable]
+    public class LnData
+    {
+        public int id, typeIdx;
+        public string name;
+        public int[] route;
+        public int[] tracks;
     }
 
     [Serializable]
@@ -41,9 +51,11 @@ public static class SaveLoad
         public long carried;
         public float minutes, speed;
         public int nameCounter;
+        public int lineIdCounter;
         public List<StData> st = new List<StData>();
         public List<SegData> seg = new List<SegData>();
         public List<TrData> tr = new List<TrData>();
+        public List<LnData> ln = new List<LnData>();
     }
 
     public static void Save()
@@ -56,6 +68,7 @@ public static class SaveLoad
             minutes = GameState.gameMinutes,
             speed = GameState.timeScale,
             nameCounter = TrackNetwork.nameCounter,
+            lineIdCounter = Services.idCounter,
         };
         var idxOf = new Dictionary<Station, int>();
         for (int i = 0; i < TrackNetwork.stations.Count; i++) idxOf[TrackNetwork.stations[i]] = i;
@@ -82,6 +95,24 @@ public static class SaveLoad
         foreach (var g in TrackNetwork.segments)
             d.seg.Add(new SegData { a = idxOf[g.a], b = idxOf[g.b], sa = g.signA, sb = g.signB });
 
+        foreach (var l in Services.lines)
+        {
+            var r = new List<int>();
+            bool okL = true;
+            foreach (var s in l.route)
+            {
+                if (s == null || !idxOf.ContainsKey(s)) { okL = false; break; }
+                r.Add(idxOf[s]);
+            }
+            if (!okL || r.Count < 2) continue;
+            d.ln.Add(new LnData
+            {
+                id = l.id, typeIdx = l.typeIdx, name = l.name,
+                route = r.ToArray(),
+                tracks = l.tracks != null ? l.tracks.ToArray() : null,
+            });
+        }
+
         foreach (var t in UnityEngine.Object.FindObjectsByType<Train>(FindObjectsSortMode.None))
         {
             if (t.fm == null || t.route == null) continue;
@@ -102,6 +133,7 @@ public static class SaveLoad
                 tracks = tracks,
                 idx = Mathf.Clamp(t.idx, 0, r.Count - 1),
                 dir = t.dir,
+                lineId = t.lineId,
             });
         }
         PlayerPrefs.SetString(Key, JsonUtility.ToJson(d));
@@ -126,6 +158,8 @@ public static class SaveLoad
         GameState.gameMinutes = d.minutes;
         if (d.speed > 0) GameState.timeScale = d.speed;
         TrackNetwork.nameCounter = d.nameCounter;
+        Services.Clear();
+        Services.idCounter = d.lineIdCounter;
 
         var sts = new List<Station>();
         foreach (var sd in d.st)
@@ -165,6 +199,28 @@ public static class SaveLoad
         // 線路が揃ってから街を再構築(決定的なので駅devから同じ街が復元される)
         foreach (var s in sts) { s.developed = 0; CityGrid.Develop(s); }
 
+        // 運行系統を復元(列車より先。番線は無効なら停車線へ)
+        if (d.ln != null)
+            foreach (var ld in d.ln)
+            {
+                if (ld.route == null || ld.route.Length < 2) continue;
+                var route = new List<Station>();
+                var tracks = new List<int>();
+                bool ok = true;
+                for (int i = 0; i < ld.route.Length; i++)
+                {
+                    int ri = ld.route[i];
+                    if (ri < 0 || ri >= sts.Count) { ok = false; break; }
+                    var s = sts[ri];
+                    route.Add(s);
+                    int trk = (ld.tracks != null && i < ld.tracks.Length) ? ld.tracks[i] : -1;
+                    if (trk < 0 || trk >= s.occupied.Length || s.PlatformNumberOf(trk) <= 0) trk = s.StopTracks[0];
+                    tracks.Add(trk);
+                }
+                if (!ok || route.Count < 2) continue;
+                Services.lines.Add(new ServiceLine { id = ld.id, typeIdx = ld.typeIdx, name = ld.name, route = route, tracks = tracks });
+            }
+
         if (d.tr != null)
             foreach (var td in d.tr)
             {
@@ -192,7 +248,9 @@ public static class SaveLoad
                 if (!route[startIdx].TryReserveSpecific(tracks[startIdx])) continue;
                 var go = new GameObject("Train_" + fm.Label);
                 go.transform.SetParent(BuildController.WorldRoot, false);
-                go.AddComponent<Train>().Init(fm, route, tracks, startIdx, td.dir);
+                var trn = go.AddComponent<Train>();
+                trn.Init(fm, route, tracks, startIdx, td.dir);
+                trn.lineId = td.lineId;
             }
         return true;
     }
@@ -203,6 +261,7 @@ public static class SaveLoad
         PlayerPrefs.Save();
         suppress = true;
         TrackNetwork.Clear();
+        Services.Clear();
         GameState.money = 100e8;
         GameState.carried = 0;
         GameState.gameMinutes = 6 * 60;

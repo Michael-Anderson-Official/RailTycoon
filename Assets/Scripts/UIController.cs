@@ -20,6 +20,11 @@ public class UIController : MonoBehaviour
     float removeArmedUntil;
     GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow, renameModal;
     InputField renameInput;
+    // 列車パネル(タブ制): 系統をつくる / 列車を配置
+    GameObject serviceTab, dispatchView, lineListView, createView;
+    RectTransform lineListRows, dispatchLineRows;
+    Image tabServiceBtn, tabDispatchBtn;
+    Image[] typeBtns;
     readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
     readonly List<KeyValuePair<TrainCatalog.Formation, Image>> fmBtns = new List<KeyValuePair<TrainCatalog.Formation, Image>>();
     readonly List<KeyValuePair<float, Image>> speedBtns = new List<KeyValuePair<float, Image>>();
@@ -229,30 +234,135 @@ public class UIController : MonoBehaviour
         var rt = p.rectTransform;
         rt.pivot = new Vector2(1, 0.5f);
         rt.anchoredPosition = new Vector2(-8, 40);
-        rt.sizeDelta = new Vector2(350, 850);
+        rt.sizeDelta = new Vector2(362, 900);
         trainPanel = p.gameObject;
-        float y = -14;
-        Label("Title", p.transform, "列車を購入", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 44), new Vector2(-14, y), TextAnchor.MiddleLeft);
-        y -= 54;
+
+        tabServiceBtn = Btn("TabS", p.transform, "系統をつくる", 23, new Vector2(0, 1), new Vector2(0.5f, 1), new Vector2(10, -62), new Vector2(-3, -10), () => SetTab(0));
+        tabDispatchBtn = Btn("TabD", p.transform, "列車を配置", 23, new Vector2(0.5f, 1), new Vector2(1, 1), new Vector2(3, -62), new Vector2(-10, -10), () => SetTab(1));
+
+        serviceTab = Rect("ServiceTab", p.transform, Vector2.zero, Vector2.one, new Vector2(10, 12), new Vector2(-10, -70)).gameObject;
+        dispatchView = Rect("DispatchView", p.transform, Vector2.zero, Vector2.one, new Vector2(10, 12), new Vector2(-10, -70)).gameObject;
+        BuildServiceTab(serviceTab.transform);
+        BuildDispatchView(dispatchView.transform);
+    }
+
+    void BuildServiceTab(Transform parent)
+    {
+        // 一覧ビュー(Manage)
+        lineListView = Rect("LineList", parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject;
+        Btn("NewLine", lineListView.transform, "＋ 新しい系統を作る", 25, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -58), new Vector2(0, -2), () => BC.BeginCreateLine(), BtnActive);
+        Label("LLTitle", lineListView.transform, "運行系統一覧", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -98), new Vector2(-2, -66), TextAnchor.MiddleLeft);
+        lineListRows = Rect("Rows", lineListView.transform, Vector2.zero, Vector2.one, Vector2.zero, new Vector2(0, -102));
+
+        // 作成ビュー(CreateLine)
+        createView = Rect("Create", parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject;
+        Label("CT", createView.transform, "種別を選択", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -34), new Vector2(-2, -2), TextAnchor.MiddleLeft);
+        typeBtns = new Image[ServiceType.Names.Length];
+        for (int i = 0; i < ServiceType.Names.Length; i++)
+        {
+            int ti = i;
+            float w = 1f / ServiceType.Names.Length;
+            typeBtns[i] = Btn("Ty" + i, createView.transform, ServiceType.Names[i], 22,
+                new Vector2(i * w + 0.01f, 1), new Vector2((i + 1) * w - 0.01f, 1),
+                new Vector2(0, -92), new Vector2(0, -40), () => BC.SetNewLineType(ti));
+        }
+        var prRt = Rect("PlatformRow", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -152), new Vector2(0, -100));
+        platformRow = prRt.gameObject;
+        platformRow.SetActive(false);
+        routeText = Label("Route", createView.transform, "", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -280), new Vector2(-2, -160), TextAnchor.UpperLeft);
+        Btn("SaveLine", createView.transform, "系統を保存", 26, new Vector2(0, 1), new Vector2(0.6f, 1), new Vector2(0, -344), new Vector2(-3, -290), () => BC.SaveNewLine(), BtnActive);
+        Btn("CancelLine", createView.transform, "やめる", 24, new Vector2(0.62f, 1), new Vector2(1, 1), new Vector2(3, -344), new Vector2(0, -290), () => BC.CancelCreateLine());
+    }
+
+    void BuildDispatchView(Transform parent)
+    {
+        float y = -2;
+        Label("DT", parent, "編成を選ぶ", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 30), new Vector2(-2, y), TextAnchor.MiddleLeft);
+        y -= 38;
         foreach (var fm in TrainCatalog.Formations)
         {
             var f = fm;
-            var img = Btn("F" + f.Label, p.transform, f.Label + "  " + (f.CostYen / 1e8).ToString("F0") + "億円", 25,
-                new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 58), new Vector2(-14, y), () => SelectFormation(f));
+            var img = Btn("F" + f.Label, parent, f.Label + "  " + (f.CostYen / 1e8).ToString("F0") + "億円", 22,
+                new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 50), new Vector2(0, y), () => SelectFormation(f));
             fmBtns.Add(new KeyValuePair<TrainCatalog.Formation, Image>(f, img));
-            y -= 66;
+            y -= 56;
         }
-        fmInfoText = Label("FmInfo", p.transform, "編成を選択してください", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 58), new Vector2(-14, y), TextAnchor.UpperLeft);
-        y -= 66;
-        // 番線選択ボタンの置き場所(駅タップ時に動的生成)
-        var prRt = Rect("PlatformRow", p.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 52), new Vector2(-14, y));
-        platformRow = prRt.gameObject;
-        platformRow.SetActive(false);
-        y -= 60;
-        routeText = Label("Route", p.transform, "", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 84), new Vector2(-14, y), TextAnchor.UpperLeft);
-        y -= 94;
-        Btn("Launch", p.transform, "発車!", 30, new Vector2(0, 1), new Vector2(0.55f, 1), new Vector2(14, y - 66), new Vector2(0, y), () => BC.LaunchTrain(), BtnActive);
-        Btn("ClearR", p.transform, "経路クリア", 24, new Vector2(0.58f, 1), new Vector2(1, 1), new Vector2(0, y - 66), new Vector2(-14, y), () => BC.ClearRoute());
+        fmInfoText = Label("FmInfo", parent, "編成を選択してください", 20, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 44), new Vector2(-2, y), TextAnchor.UpperLeft);
+        y -= 52;
+        Label("DLT", parent, "配属する系統を選ぶ", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 30), new Vector2(-2, y), TextAnchor.MiddleLeft);
+        y -= 38;
+        dispatchLineRows = Rect("DRows", parent, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 210), new Vector2(0, y));
+        y -= 218;
+        Btn("Dispatch", parent, "この系統に配置(購入)", 25, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 58), new Vector2(0, y), () => BC.DispatchTrain(), BtnActive);
+    }
+
+    void SetTab(int t)
+    {
+        if (t == 0) BC.GoManageTab();
+        else BC.GoDispatchTab();
+    }
+
+    // 列車パネルの表示をBC.trainSub/系統一覧に合わせて更新
+    public void RefreshTrainPanel()
+    {
+        if (serviceTab == null) return;
+        bool dispatch = BC.trainSub == BuildController.TrainSub.Dispatch;
+        serviceTab.SetActive(!dispatch);
+        dispatchView.SetActive(dispatch);
+        if (tabServiceBtn != null) tabServiceBtn.color = dispatch ? BtnBg : BtnActive;
+        if (tabDispatchBtn != null) tabDispatchBtn.color = dispatch ? BtnActive : BtnBg;
+
+        if (!dispatch)
+        {
+            bool creating = BC.trainSub == BuildController.TrainSub.CreateLine;
+            lineListView.SetActive(!creating);
+            createView.SetActive(creating);
+            if (creating)
+            {
+                for (int i = 0; i < typeBtns.Length; i++)
+                    typeBtns[i].color = i == BC.newLineType ? ServiceType.Colors[i] : BtnBg;
+                UpdateRouteLabel();
+            }
+            else BuildLineRows(lineListRows, false);
+        }
+        else
+        {
+            BuildLineRows(dispatchLineRows, true);
+            foreach (var kv in fmBtns) kv.Value.color = kv.Key == BC.selFormation ? BtnActive : BtnBg;
+        }
+    }
+
+    void BuildLineRows(RectTransform container, bool forDispatch)
+    {
+        if (container == null) return;
+        for (int i = container.childCount - 1; i >= 0; i--) Destroy(container.GetChild(i).gameObject);
+        if (Services.lines.Count == 0)
+        {
+            Label("empty", container, forDispatch ? "先に「系統をつくる」で作成してください" : "系統がありません。上のボタンで作成", 20,
+                new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -56), new Vector2(-2, -2), TextAnchor.UpperLeft);
+            return;
+        }
+        float y = -2;
+        foreach (var line in Services.lines)
+        {
+            var l = line;
+            var tc = l.TypeColor;
+            string label = l.DisplayName + "  ×" + l.TrainCount + "本";
+            if (forDispatch)
+            {
+                var bg = l == BC.selLine ? BtnActive : new Color(tc.r, tc.g, tc.b, 0.85f);
+                Btn("L" + l.id, container, label, 20, new Vector2(0, 1), new Vector2(1, 1),
+                    new Vector2(0, y - 52), new Vector2(0, y), () => { BC.selLine = l; RefreshTrainPanel(); }, bg);
+            }
+            else
+            {
+                Btn("L" + l.id, container, label, 20, new Vector2(0, 1), new Vector2(0.78f, 1),
+                    new Vector2(0, y - 52), new Vector2(-3, y), () => { }, new Color(tc.r, tc.g, tc.b, 0.85f));
+                Btn("Del" + l.id, container, "廃止", 20, new Vector2(0.8f, 1), new Vector2(1, 1),
+                    new Vector2(3, y - 52), new Vector2(0, y), () => BC.DeleteLine(l), new Color(0.55f, 0.22f, 0.24f, 0.95f));
+            }
+            y -= 58;
+        }
     }
 
     void SelectFormation(TrainCatalog.Formation f)
@@ -260,7 +370,6 @@ public class UIController : MonoBehaviour
         BC.selFormation = f;
         foreach (var kv in fmBtns) kv.Value.color = kv.Key == f ? BtnActive : BtnBg;
         fmInfoText.text = f.Label + ": 定員" + f.Capacity + "人 / 最高" + f.type.maxSpeedKmh + "km/h\n停車駅は" + f.cars + "両以上対応が必要";
-        UpdateRouteLabel();
     }
 
     public void UpdateRouteLabel()
@@ -441,6 +550,7 @@ public class UIController : MonoBehaviour
         foreach (var kv in modeBtns) kv.Value.color = kv.Key == mode ? BtnActive : BtnBg;
         stationPanel.SetActive(mode == BuildController.Mode.Station);
         trainPanel.SetActive(mode == BuildController.Mode.Train);
+        if (mode == BuildController.Mode.Train) RefreshTrainPanel();
         if (mode != BuildController.Mode.View) HideStationInfo();
         UpdateRouteLabel();
     }
