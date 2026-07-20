@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -8,11 +9,17 @@ public class UIController : MonoBehaviour
     public static UIController I;
     public CameraRig rig;
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+    // WebGLはブラウザのwindow.promptで駅名入力(iOS Safariでも確実にキーボードが出る)
+    [DllImport("__Internal")] static extern string RailPromptName(string def);
+#endif
+
     Text moneyText, clockText, carriedText, toastText, costText, routeText, infoText, fmInfoText;
     Text carsVal, facesVal, linesVal, stationTitle, confirmBtnLabel;
     Station infoStation;
     float removeArmedUntil;
-    GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow;
+    GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow, renameModal;
+    InputField renameInput;
     readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
     readonly List<KeyValuePair<TrainCatalog.Formation, Image>> fmBtns = new List<KeyValuePair<TrainCatalog.Formation, Image>>();
     readonly List<KeyValuePair<float, Image>> speedBtns = new List<KeyValuePair<float, Image>>();
@@ -42,6 +49,7 @@ public class UIController : MonoBehaviour
         BuildStationPanel();
         BuildTrainPanel();
         BuildInfoPanel();
+        BuildRenameModal();
         BuildToast();
         OnModeChanged();
     }
@@ -304,13 +312,73 @@ public class UIController : MonoBehaviour
         var rt = p.rectTransform;
         rt.pivot = new Vector2(0.5f, 1);
         rt.anchoredPosition = new Vector2(0, -120);
-        rt.sizeDelta = new Vector2(480, 320);
+        rt.sizeDelta = new Vector2(480, 380);
         infoPanel = p.gameObject;
-        infoText = Label("Info", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(16, 128), new Vector2(-16, -12), TextAnchor.UpperLeft);
+        infoText = Label("Info", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(16, 184), new Vector2(-16, -12), TextAnchor.UpperLeft);
+        Btn("Rename", p.transform, "名前を変更", 26, new Vector2(0.04f, 0), new Vector2(0.96f, 0), new Vector2(0, 126), new Vector2(0, 174), OnRenameTap, new Color(0.24f, 0.42f, 0.5f, 0.95f));
         Btn("Rebuild", p.transform, "建て替え", 26, new Vector2(0.04f, 0), new Vector2(0.49f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRebuildTap, BtnActive);
         Btn("Remove", p.transform, "撤去", 26, new Vector2(0.51f, 0), new Vector2(0.96f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRemoveTap, new Color(0.55f, 0.22f, 0.24f, 0.95f));
         Btn("Close", p.transform, "閉じる", 24, new Vector2(0.3f, 0), new Vector2(0.7f, 0), new Vector2(0, 12), new Vector2(0, 60), HideStationInfo);
         infoPanel.SetActive(false);
+    }
+
+    // 駅名入力: WebGLはブラウザのpromptを使い、それ以外(エディタ等)は自前のモーダル
+    void OnRenameTap()
+    {
+        if (infoStation == null) return;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        ApplyRename(RailPromptName(infoStation.stationName));
+#else
+        renameInput.text = infoStation.stationName;
+        renameModal.SetActive(true);
+        renameInput.Select();
+        renameInput.ActivateInputField();
+#endif
+    }
+
+    void OnRenameOk()
+    {
+        renameModal.SetActive(false);
+        ApplyRename(renameInput.text);
+    }
+
+    void ApplyRename(string name)
+    {
+        if (infoStation == null) return;
+        name = (name ?? "").Trim();
+        if (name.Length == 0) { Toast("駅名が空だったので変更しませんでした"); return; }
+        if (name.Length > 12) name = name.Substring(0, 12);
+        infoStation.stationName = name;
+        infoStation.gameObject.name = name;
+        infoStation.UpdateLabel();
+        ShowStationInfo(infoStation);   // 情報パネルを更新表示
+        SaveLoad.Save();
+        Toast("駅名を「" + name + "」に変更しました");
+    }
+
+    // エディタ/非WebGL用の駅名入力モーダル(uGUI InputField)
+    void BuildRenameModal()
+    {
+        var overlay = Panel("RenameModal", transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, new Color(0, 0, 0, 0.55f));
+        renameModal = overlay.gameObject;
+        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
+        box.rectTransform.sizeDelta = new Vector2(580, 300);
+        Label("T", box.transform, "駅名を変更", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -66), new Vector2(-24, -16), TextAnchor.MiddleLeft);
+        var ifImg = Panel("IF", box.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -156), new Vector2(-24, -82), new Color(0.96f, 0.97f, 0.99f, 1f));
+        renameInput = ifImg.gameObject.AddComponent<InputField>();
+        var txt = Label("Txt", ifImg.transform, "", 30, Vector2.zero, Vector2.one, new Vector2(14, 4), new Vector2(-14, -4), TextAnchor.MiddleLeft);
+        txt.color = new Color(0.1f, 0.1f, 0.13f);
+        txt.supportRichText = false;
+        var ph = Label("PH", ifImg.transform, "駅名を入力", 30, Vector2.zero, Vector2.one, new Vector2(14, 4), new Vector2(-14, -4), TextAnchor.MiddleLeft);
+        ph.color = new Color(0.45f, 0.45f, 0.5f);
+        renameInput.textComponent = txt;
+        renameInput.placeholder = ph;
+        renameInput.targetGraphic = ifImg;
+        renameInput.characterLimit = 12;
+        renameInput.lineType = InputField.LineType.SingleLine;
+        Btn("OK", box.transform, "決定", 28, new Vector2(0, 0), new Vector2(0.48f, 0), new Vector2(24, 24), new Vector2(0, 88), OnRenameOk, BtnActive);
+        Btn("Cancel", box.transform, "キャンセル", 26, new Vector2(0.52f, 0), new Vector2(1, 0), new Vector2(0, 24), new Vector2(-24, 88), () => renameModal.SetActive(false));
+        renameModal.SetActive(false);
     }
 
     void OnRebuildTap()
