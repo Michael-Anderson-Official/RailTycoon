@@ -48,7 +48,7 @@ public class Station : MonoBehaviour
         var rail = new RailKit.MeshData();
         var tie = new RailKit.MeshData();
         for (int i = 0; i < layout.trackOffsets.Length; i++)
-            RailKit.AddTrack(ballast, rail, tie, LocalTrackPath(i));
+            RailKit.AddTrack(ballast, rail, tie, RailKit.Chaikin(LocalTrackPath(i), 2)); // 平滑化して隙間をなくす
 
         // スロートの分岐器(転てつ機・轍叉・分岐枕木)
         var swMetal = new RailKit.MeshData();
@@ -118,51 +118,69 @@ public class Station : MonoBehaviour
         };
     }
 
-    // スロート(駅端の分岐部)に各停車線の分岐器を描く。metal=轍叉/トングレール/転てつ棒、
-    // box=転てつ機の黄箱、tie=長い分岐枕木。分岐位置を線ごとにずらしてラダー状に配置
+    // スロート(駅端の分岐部)に、左右本線(±2.3)を結ぶ渡り線をX字に交差させて描く。
+    // 2本のレールが交差する轍叉(クロッシング)+トングレール+転てつ機。
     void AddTurnouts(RailKit.MeshData metal, RailKit.MeshData box, RailKit.MeshData tie, float H, float T)
     {
-        var stops = layout.stopTracks;
-        for (int k = 0; k < stops.Count; k++)
+        const float railY = 0.46f, gauge = 0.72f, half = 2.3f;
+        // 左右どちらにも停車線があるとき(=渡り線が成立するとき)だけ描く
+        bool hasL = false, hasR = false;
+        foreach (int idx in layout.stopTracks)
         {
-            float off = layout.trackOffsets[stops[k]];
-            float end = (off >= 0 ? 1f : -1f) * 2.3f;   // LocalTrackPathの収束点x
-            for (int sgn = -1; sgn <= 1; sgn += 2)
-            {
-                // 収束点C→スロート中間Mを結ぶ線上の、線ごとにずらした位置に分岐器を置く
-                var C = new Vector3(end, 0, sgn * (H + T));
-                var M = new Vector3((off + end) * 0.5f, 0, sgn * (H + T * 0.5f));
-                float u = Mathf.Clamp01(0.32f + 0.13f * k);
-                var P = Vector3.Lerp(C, M, u);
-                var tan = (M - C); tan.y = 0;
-                if (tan.sqrMagnitude < 1e-4f) tan = new Vector3(0, 0, -sgn);
-                tan.Normalize();
-                var perp = new Vector3(-tan.z, 0, tan.x);
-                var rot = Quaternion.LookRotation(tan, Vector3.up);
-                float side = off >= 0 ? 1f : -1f;
-
-                // 轍叉(クロッシング): レール高さの金属ブロック
-                RailKit.AddBox(metal, P + Vector3.up * 0.44f, new Vector3(0.55f, 0.3f, 3.4f), rot);
-                // トングレール(先端が細る可動レール)を左右に
-                RailKit.AddBox(metal, P + perp * 0.75f + tan * -1.8f + Vector3.up * 0.46f, new Vector3(0.12f, 0.18f, 3.6f), rot);
-                RailKit.AddBox(metal, P - perp * 0.75f + tan * -1.8f + Vector3.up * 0.46f, new Vector3(0.12f, 0.18f, 3.6f), rot);
-                // 分岐枕木(通常より長い): 前後に数本
-                for (int j = -2; j <= 2; j++)
-                    RailKit.AddBox(tie, P + tan * (j * 1.05f) + Vector3.up * 0.28f, new Vector3(4.4f, 0.12f, 0.26f), rot);
-
-                // 転てつ機(黄箱)を軌道脇に + てこ + 転てつ棒
-                var mach = P + perp * (2.6f * side);
-                RailKit.AddBox(box, mach + Vector3.up * 0.42f, new Vector3(0.9f, 0.72f, 1.3f), rot);
-                RailKit.AddBox(metal, mach + Vector3.up * 0.95f, new Vector3(0.14f, 0.5f, 0.14f), rot * Quaternion.Euler(0, 0, 22f));
-                var rodEnd = P + perp * (0.9f * side);
-                var mid = (mach + rodEnd) * 0.5f;
-                var rdir = rodEnd - mach; rdir.y = 0;
-                float rlen = rdir.magnitude;
-                if (rlen > 0.1f)
-                    RailKit.AddBox(metal, mid + Vector3.up * 0.34f, new Vector3(0.08f, 0.08f, rlen),
-                        Quaternion.LookRotation(rdir.normalized, Vector3.up));
-            }
+            if (layout.trackOffsets[idx] < 0) hasL = true; else hasR = true;
         }
+        if (!(hasL && hasR)) return;
+
+        for (int sgn = -1; sgn <= 1; sgn += 2)
+        {
+            float zc = sgn * (H + T * 0.55f);   // 渡り線の中心z
+            float L = 8f;                        // 交差の半分の長さ(z方向)
+            var La = new Vector3(-half, 0, zc - sgn * L);  // 左線 手前
+            var Lb = new Vector3(+half, 0, zc + sgn * L);  // 右線 奥  (左→右へ渡るレール)
+            var Ra = new Vector3(+half, 0, zc - sgn * L);
+            var Rb = new Vector3(-half, 0, zc + sgn * L);  // 右→左へ渡るレール
+            AddCrossRail(metal, La, Lb, railY, gauge);
+            AddCrossRail(metal, Ra, Rb, railY, gauge);
+            // 交差中心の轍叉ノーズ
+            RailKit.AddBox(metal, new Vector3(0, railY - 0.02f, zc), new Vector3(1.0f, 0.22f, 1.4f), Quaternion.identity);
+            // 渡り線の枕木(左右本線をまたぐ長い枕木)
+            for (int j = -4; j <= 4; j++)
+                RailKit.AddBox(tie, new Vector3(0, 0.28f, zc + j * 1.5f), new Vector3(6.4f, 0.12f, 0.26f), Quaternion.identity);
+            // トングレール(各本線の交差手前に可動レール)+転てつ機を4隅に
+            AddPoint(metal, box, new Vector3(-half, 0, zc - sgn * L), sgn, +1);
+            AddPoint(metal, box, new Vector3(+half, 0, zc - sgn * L), sgn, -1);
+        }
+    }
+
+    // p0→p1へ渡るレール(左右2本の平行レール)を1本の渡りレールとして描く
+    static void AddCrossRail(RailKit.MeshData metal, Vector3 p0, Vector3 p1, float railY, float gauge)
+    {
+        var dir = p1 - p0; dir.y = 0;
+        float len = dir.magnitude;
+        if (len < 0.1f) return;
+        var rot = Quaternion.LookRotation(dir.normalized, Vector3.up);
+        var mid = (p0 + p1) * 0.5f + Vector3.up * railY;
+        var perp = new Vector3(-dir.z, 0, dir.x).normalized;
+        RailKit.AddBox(metal, mid + perp * gauge, new Vector3(0.13f, 0.16f, len), rot);
+        RailKit.AddBox(metal, mid - perp * gauge, new Vector3(0.13f, 0.16f, len), rot);
+    }
+
+    // 本線側のトングレール(先細り風)と、脇の転てつ機(黄箱+てこ+転てつ棒)
+    static void AddPoint(RailKit.MeshData metal, RailKit.MeshData box, Vector3 at, int sgn, int outX)
+    {
+        var fwd = new Vector3(0, 0, sgn);
+        var rot = Quaternion.LookRotation(fwd, Vector3.up);
+        // トングレール
+        RailKit.AddBox(metal, at + Vector3.up * 0.46f - fwd * 3f, new Vector3(0.11f, 0.16f, 5f), rot);
+        // 転てつ機を本線の外側に
+        var mach = at + new Vector3(2.4f * outX, 0, 0);
+        RailKit.AddBox(box, mach + Vector3.up * 0.42f, new Vector3(0.9f, 0.72f, 1.3f), rot);
+        RailKit.AddBox(metal, mach + Vector3.up * 0.95f, new Vector3(0.14f, 0.5f, 0.14f), rot * Quaternion.Euler(0, 0, 22f));
+        var rodEnd = at + new Vector3(0.9f * outX, 0, 0);
+        var rdir = rodEnd - mach; rdir.y = 0;
+        if (rdir.magnitude > 0.1f)
+            RailKit.AddBox(metal, (mach + rodEnd) * 0.5f + Vector3.up * 0.34f,
+                new Vector3(0.08f, 0.08f, rdir.magnitude), Quaternion.LookRotation(rdir.normalized, Vector3.up));
     }
 
     public Vector3 TrackWorldPoint(int trackIdx, float z)
