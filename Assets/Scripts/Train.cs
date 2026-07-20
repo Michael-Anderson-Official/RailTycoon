@@ -80,7 +80,11 @@ public class Train : MonoBehaviour
             float rem = Mathf.Max(0, total - s);
             float vAllow = Mathf.Sqrt(2f * fm.type.Decel * rem);
             float vmax = fm.type.maxSpeedKmh / 3.6f;
-            v = Mathf.Min(v + fm.type.Accel * dt, vmax, vAllow);
+            // 実車の加速は速度が上がると鈍る(定出力域+走行抵抗)。起動加速度に
+            // 1-(v/vmax)^2 を掛けて高速域で頭打ちさせる(低速はキビキビ)
+            float r = vmax > 0.1f ? v / vmax : 0f;
+            float a = fm.type.Accel * Mathf.Max(0.08f, 1f - r * r);
+            v = Mathf.Min(v + a * dt, vmax, vAllow);
             s += v * dt;
             if (!released && s > releaseS)
             {

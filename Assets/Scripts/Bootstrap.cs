@@ -101,9 +101,9 @@ public class Bootstrap : MonoBehaviour
 
     void Update()
     {
-        float dtMin = Time.deltaTime * GameState.timeScale;
-        GameState.gameMinutes += dtMin;
-        foreach (var st in TrackNetwork.stations) st.Tick(dtMin);
+        float dtSec = Time.deltaTime * GameState.timeScale;      // 列車と同じ実時間基準(×1で実速度)
+        GameState.gameMinutes += dtSec / 60f;                    // 時計も実時間(×1=1秒で1秒進む)
+        foreach (var st in TrackNetwork.stations) st.Tick(dtSec);
 
         saveTimer += Time.unscaledDeltaTime;
         if (saveTimer >= 15f)
