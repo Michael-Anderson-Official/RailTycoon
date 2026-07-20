@@ -196,6 +196,7 @@ public static class SaveLoad
                 TrackNetwork.segments.Add(seg);
             }
         TrackNetwork.MarkDirty();
+        foreach (var s in sts) s.RefreshBufferStops();   // 接続状況に応じて車止め更新
 
         // 線路が揃ってから街を再構築(決定的なので駅devから同じ街が復元される)
         foreach (var s in sts) { s.developed = 0; CityGrid.Develop(s); }

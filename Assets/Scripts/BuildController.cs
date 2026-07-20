@@ -240,14 +240,18 @@ public class BuildController : MonoBehaviour
             t.ReleaseAll();               // 隣駅などに残る予約を解放してから破棄
             DestroySafe(t.gameObject);
         }
+        var neighbors = new List<Station>();
         for (int i = TrackNetwork.segments.Count - 1; i >= 0; i--)
         {
             var seg = TrackNetwork.segments[i];
             if (seg.a != st && seg.b != st) continue;
+            var other = seg.Other(st);
+            if (other != null && other != st && !neighbors.Contains(other)) neighbors.Add(other);
             refund += seg.length * GameState.TrackCostPerM * 0.5;
             if (seg.go != null) DestroySafe(seg.go);
             TrackNetwork.segments.RemoveAt(i);
         }
+        foreach (var nb in neighbors) nb.RefreshBufferStops();   // 端が空いたので車止め復活
         // この駅を含む運行系統は成立しないので廃止(列車は上でRouteHasにより撤去済み)
         int removedLines = Services.lines.RemoveAll(l => l.route.Contains(st));
         selLines.RemoveAll(l => !Services.lines.Contains(l));
@@ -303,6 +307,8 @@ public class BuildController : MonoBehaviour
         var seg = new TrackSegment { a = a, b = st, signA = bestSa, signB = bestSb };
         seg.Build(WorldRoot);
         TrackNetwork.segments.Add(seg);
+        a.RefreshBufferStops();     // 接続した端の車止めを消す
+        st.RefreshBufferStops();
         TrackNetwork.MarkDirty();
         SaveLoad.Save();
         UIController.Toast(a.stationName + "〜" + st.stationName + " 線路敷設(" + (cost / 1e8).ToString("F1") + "億円)");

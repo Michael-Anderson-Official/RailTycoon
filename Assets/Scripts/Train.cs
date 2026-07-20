@@ -313,12 +313,13 @@ public class Train : MonoBehaviour
         Station to, int toTrack, int enterSign, float halfTrain)
     {
         var pts = new List<Vector3>();
-        float hf = from.HalfLen, tf = StationLayout.ThroatLen;
+        float hf = from.HalfLen, tf = StationLayout.ThroatLen, L = StationLayout.LeadLen;
         float offF = from.layout.trackOffsets[fromTrack];
         pts.Add(from.TrackWorldPoint(fromTrack, -exitSign * halfTrain));
         pts.Add(from.TrackWorldPoint(fromTrack, 0));
-        pts.Add(from.TrackWorldPoint(fromTrack, exitSign * hf));
-        pts.Add(from.transform.TransformPoint(new Vector3(Mathf.Sign(offF) * 2.3f, 0, exitSign * (hf + tf * 0.6f))));
+        pts.Add(from.TrackWorldPoint(fromTrack, exitSign * hf));                                                     // ホーム端
+        pts.Add(from.transform.TransformPoint(new Vector3(Mathf.Sign(offF) * 2.3f, 0, exitSign * (hf + tf - L))));   // 収束(±2.3)
+        pts.Add(from.transform.TransformPoint(new Vector3(Mathf.Sign(offF) * 2.3f, 0, exitSign * (hf + tf))));       // 駅端(リード端)
 
         var endA = from.End(exitSign);
         var endB = to.End(enterSign);
@@ -332,7 +333,8 @@ public class Train : MonoBehaviour
 
         float ht = to.HalfLen;
         float offT = to.layout.trackOffsets[toTrack];
-        pts.Add(to.transform.TransformPoint(new Vector3(Mathf.Sign(offT) * 2.3f, 0, enterSign * (ht + tf * 0.6f))));
+        pts.Add(to.transform.TransformPoint(new Vector3(Mathf.Sign(offT) * 2.3f, 0, enterSign * (ht + tf))));       // 駅端(リード端)
+        pts.Add(to.transform.TransformPoint(new Vector3(Mathf.Sign(offT) * 2.3f, 0, enterSign * (ht + tf - L))));   // 収束(±2.3)
         pts.Add(to.TrackWorldPoint(toTrack, enterSign * ht));
         pts.Add(to.TrackWorldPoint(toTrack, 0));
         pts.Add(to.TrackWorldPoint(toTrack, -enterSign * halfTrain));

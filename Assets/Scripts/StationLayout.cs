@@ -10,7 +10,8 @@ public static class StationLayout
     public const float TrackPitch = 4.6f;   // 線1本の占有幅
     public const float PlatformWidth = 8f;
     public const float CarLength = 20f;
-    public const float ThroatLen = 45f;     // 駅端から収束点までの距離
+    public const float ThroatLen = 52f;     // 駅端から収束点までの距離
+    public const float LeadLen = 30f;       // 収束後、駅端手前で±2.3の平行になる直線区間(渡り線を置く)
 
     public struct Result
     {
