@@ -44,24 +44,7 @@ public class Station : MonoBehaviour
         occupied = new bool[layout.trackOffsets.Length];
 
         float H = HalfLen, T = StationLayout.ThroatLen;
-        var ballast = new RailKit.MeshData();
-        var rail = new RailKit.MeshData();
-        var tie = new RailKit.MeshData();
-        for (int i = 0; i < layout.trackOffsets.Length; i++)
-            RailKit.AddTrack(ballast, rail, tie, RailKit.Chaikin(LocalTrackPath(i), 2)); // 平滑化して隙間をなくす
-
-        // 駅前(スロートのリード区間)に両渡り線=シザースクロッシングを描く。
-        // 駅ローカル座標なので列車の走行経路(±2.3のリード)と必ず一致する
-        var swMetal = new RailKit.MeshData();
-        var swBox = new RailKit.MeshData();
-        bool hasL = false, hasR = false;
-        foreach (int si in layout.stopTracks) { if (layout.trackOffsets[si] < 0) hasL = true; else hasR = true; }
-        if (hasL && hasR)
-        {
-            float leadC = H + StationLayout.ThroatLen - StationLayout.LeadLen * 0.5f;
-            RailKit.AddCrossover(rail, swMetal, swBox, tie, ballast, new Vector3(0, 0, leadC), new Vector3(0, 0, 1));
-            RailKit.AddCrossover(rail, swMetal, swBox, tie, ballast, new Vector3(0, 0, -leadC), new Vector3(0, 0, 1));
-        }
+        RebuildTrackVisual();   // 線路・渡り線・車止め(接続状態で頭端/貫通を切替)
 
         var plat = new RailKit.MeshData();
         var canopy = new RailKit.MeshData();
@@ -79,16 +62,9 @@ public class Station : MonoBehaviour
         RailKit.AddBox(house, new Vector3(houseX, 2.2f, 0), new Vector3(9f, 4.4f, 7f), Quaternion.identity);
         RailKit.AddBox(house, new Vector3(houseX, 4.6f, 0), new Vector3(10f, 0.4f, 8f), Quaternion.identity);
 
-        RailKit.MeshGO("Ballast", ballast.ToMesh(), MatLib.Get("Ballast"), transform);
-        RailKit.MeshGO("Rail", rail.ToMesh(), MatLib.Get("Rail"), transform);
-        RailKit.MeshGO("Tie", tie.ToMesh(), MatLib.Get("Tie"), transform);
-        RailKit.MeshGO("Switch", swMetal.ToMesh(), MatLib.Get("Switch"), transform);
-        RailKit.MeshGO("SwitchBox", swBox.ToMesh(), MatLib.Get("SwitchBox"), transform);
         RailKit.MeshGO("Platform", plat.ToMesh(), MatLib.Get("Platform"), transform);
         RailKit.MeshGO("Canopy", canopy.ToMesh(), MatLib.Get("Canopy"), transform);
         RailKit.MeshGO("House", house.ToMesh(), MatLib.Get("StationHouse"), transform);
-
-        RefreshBufferStops();
 
         var col = gameObject.GetComponent<BoxCollider>();
         if (col == null) col = gameObject.AddComponent<BoxCollider>();
@@ -111,59 +87,94 @@ public class Station : MonoBehaviour
         // 街はCityGridがワールドグリッド上にまとめて生成する(駅の子ではない)
     }
 
-    // 線iの駅内経路(ローカル、-z端→+z端)。スロート部で駅間複線の±2.3mへ収束する
-    public List<Vector3> LocalTrackPath(int i)
+    // 接続済みの端 [0]=sign-1, [1]=sign+1
+    bool[] GetConnectedEnds()
+    {
+        var c = new bool[2];
+        foreach (var seg in TrackNetwork.segments)
+        {
+            if (seg.a == this) c[seg.signA > 0 ? 1 : 0] = true;
+            if (seg.b == this) c[seg.signB > 0 ? 1 : 0] = true;
+        }
+        return c;
+    }
+
+    // 線iの駅内経路(ローカル)。接続された端はスロート(収束→リード→駅端)まで伸ばし、
+    // 未接続の端はホーム端で止める(頭端式)
+    List<Vector3> TrackVisualPath(int i, bool cMinus, bool cPlus)
     {
         float off = layout.trackOffsets[i];
         float end = Mathf.Sign(off) * 2.3f;
         float H = HalfLen, T = StationLayout.ThroatLen, L = StationLayout.LeadLen;
-        float cz = H + (T - L);          // 収束完了z(ここから駅端まで±2.3の平行=リード)
-        float mz = H + (T - L) * 0.5f;   // 収束途中
-        return new List<Vector3>
+        float cz = H + (T - L), mz = H + (T - L) * 0.5f;
+        var pts = new List<Vector3>();
+        if (cMinus)
         {
-            new Vector3(end, 0, -(H + T)),        // 駅端(±2.3)
-            new Vector3(end, 0, -cz),             // リード始点(±2.3)
-            new Vector3((off + end) * 0.5f, 0, -mz),
-            new Vector3(off, 0, -H),              // ホーム端
-            new Vector3(off, 0, H),
-            new Vector3((off + end) * 0.5f, 0, mz),
-            new Vector3(end, 0, cz),              // リード始点(±2.3)
-            new Vector3(end, 0, H + T),           // 駅端(±2.3)
-        };
+            pts.Add(new Vector3(end, 0, -(H + T)));
+            pts.Add(new Vector3(end, 0, -cz));
+            pts.Add(new Vector3((off + end) * 0.5f, 0, -mz));
+        }
+        pts.Add(new Vector3(off, 0, -H));   // ホーム端
+        pts.Add(new Vector3(off, 0, H));
+        if (cPlus)
+        {
+            pts.Add(new Vector3((off + end) * 0.5f, 0, mz));
+            pts.Add(new Vector3(end, 0, cz));
+            pts.Add(new Vector3(end, 0, H + T));
+        }
+        return pts;
+    }
+
+    // 線路・渡り線・車止めを接続状態に応じて再生成(TrackWork子にまとめる)。
+    // 線路の接続/撤去/ロード時に呼ぶと、繋がった端は貫通・未接続の端は頭端(車止め)になる
+    public void RebuildTrackVisual()
+    {
+        if (layout.trackOffsets == null) return;
+        var old = transform.Find("TrackWork");
+        if (old != null) DestroyImmediateSafe(old.gameObject);
+        var tw = new GameObject("TrackWork");
+        tw.transform.SetParent(transform, false);
+
+        var conn = GetConnectedEnds();
+        float H = HalfLen, T = StationLayout.ThroatLen, L = StationLayout.LeadLen;
+        var ballast = new RailKit.MeshData();
+        var rail = new RailKit.MeshData();
+        var tie = new RailKit.MeshData();
+        var swMetal = new RailKit.MeshData();
+        var swBox = new RailKit.MeshData();
+
+        for (int i = 0; i < layout.trackOffsets.Length; i++)
+            RailKit.AddTrack(ballast, rail, tie, RailKit.Chaikin(TrackVisualPath(i, conn[0], conn[1]), 2));
+
+        bool hasL = false, hasR = false;
+        foreach (int si in layout.stopTracks) { if (layout.trackOffsets[si] < 0) hasL = true; else hasR = true; }
+        for (int e = 0; e < 2; e++)
+        {
+            int sign = e == 0 ? -1 : 1;
+            if (conn[e])
+            {
+                // 接続端: 駅前(リード)に両渡り線
+                if (hasL && hasR)
+                    RailKit.AddCrossover(rail, swMetal, swBox, tie, ballast,
+                        new Vector3(0, 0, sign * (H + T - L * 0.5f)), new Vector3(0, 0, 1));
+            }
+            else
+            {
+                // 未接続端: 各線のホーム端に車止め(頭端式)
+                foreach (float off in layout.trackOffsets)
+                    AddBufferStop(swMetal, swBox, new Vector3(off, 0, sign * H), sign);
+            }
+        }
+
+        RailKit.MeshGO("Ballast", ballast.ToMesh(), MatLib.Get("Ballast"), tw.transform);
+        RailKit.MeshGO("Rail", rail.ToMesh(), MatLib.Get("Rail"), tw.transform);
+        RailKit.MeshGO("Tie", tie.ToMesh(), MatLib.Get("Tie"), tw.transform);
+        RailKit.MeshGO("Switch", swMetal.ToMesh(), MatLib.Get("Switch"), tw.transform);
+        RailKit.MeshGO("SwitchBox", swBox.ToMesh(), MatLib.Get("SwitchBox"), tw.transform);
     }
 
     public Vector3 TrackWorldPoint(int trackIdx, float z)
         => transform.TransformPoint(new Vector3(layout.trackOffsets[trackIdx], 0, z));
-
-    // 未接続の駅端に車止めを立てる。線路(segment)が接続された端には立てない。
-    // 線路の接続/撤去時にも呼び直すことで、繋がると車止めが消える
-    public void RefreshBufferStops()
-    {
-        var old = transform.Find("Buffers");
-        if (old != null) DestroyImmediateSafe(old.gameObject);
-
-        bool[] connected = new bool[2]; // [0]=端sign-1, [1]=端sign+1
-        foreach (var seg in TrackNetwork.segments)
-        {
-            if (seg.a == this) connected[seg.signA > 0 ? 1 : 0] = true;
-            if (seg.b == this) connected[seg.signB > 0 ? 1 : 0] = true;
-        }
-        var metal = new RailKit.MeshData();
-        var box = new RailKit.MeshData();
-        float end = HalfLen + StationLayout.ThroatLen;
-        for (int si = 0; si < 2; si++)
-        {
-            if (connected[si]) continue;
-            int sign = si == 0 ? -1 : 1;
-            AddBufferStop(metal, box, new Vector3(-2.3f, 0, sign * end), sign);
-            AddBufferStop(metal, box, new Vector3(2.3f, 0, sign * end), sign);
-        }
-        if (metal.v.Count == 0) return;
-        var buf = new GameObject("Buffers");
-        buf.transform.SetParent(transform, false);
-        RailKit.MeshGO("BufFrame", metal.ToMesh(), MatLib.Get("Switch"), buf.transform);
-        RailKit.MeshGO("BufFace", box.ToMesh(), MatLib.Get("SwitchBox"), buf.transform);
-    }
 
     // 車止め1基。at=線路端(ローカル)、sign=どちらの端か(内向き=-sign*z)
     static void AddBufferStop(RailKit.MeshData metal, RailKit.MeshData box, Vector3 at, int sign)

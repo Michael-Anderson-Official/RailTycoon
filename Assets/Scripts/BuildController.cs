@@ -251,7 +251,7 @@ public class BuildController : MonoBehaviour
             if (seg.go != null) DestroySafe(seg.go);
             TrackNetwork.segments.RemoveAt(i);
         }
-        foreach (var nb in neighbors) nb.RefreshBufferStops();   // 端が空いたので車止め復活
+        foreach (var nb in neighbors) nb.RebuildTrackVisual();   // 端が空いたので頭端(車止め)に戻す
         // この駅を含む運行系統は成立しないので廃止(列車は上でRouteHasにより撤去済み)
         int removedLines = Services.lines.RemoveAll(l => l.route.Contains(st));
         selLines.RemoveAll(l => !Services.lines.Contains(l));
@@ -307,8 +307,8 @@ public class BuildController : MonoBehaviour
         var seg = new TrackSegment { a = a, b = st, signA = bestSa, signB = bestSb };
         seg.Build(WorldRoot);
         TrackNetwork.segments.Add(seg);
-        a.RefreshBufferStops();     // 接続した端の車止めを消す
-        st.RefreshBufferStops();
+        a.RebuildTrackVisual();     // 接続した端を貫通(車止め除去)に
+        st.RebuildTrackVisual();
         TrackNetwork.MarkDirty();
         SaveLoad.Save();
         UIController.Toast(a.stationName + "〜" + st.stationName + " 線路敷設(" + (cost / 1e8).ToString("F1") + "億円)");
