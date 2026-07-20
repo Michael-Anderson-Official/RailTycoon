@@ -50,6 +50,11 @@ public class Station : MonoBehaviour
         for (int i = 0; i < layout.trackOffsets.Length; i++)
             RailKit.AddTrack(ballast, rail, tie, LocalTrackPath(i));
 
+        // スロートの分岐器(転てつ機・轍叉・分岐枕木)
+        var swMetal = new RailKit.MeshData();
+        var swBox = new RailKit.MeshData();
+        AddTurnouts(swMetal, swBox, tie, H, T);
+
         var plat = new RailKit.MeshData();
         var canopy = new RailKit.MeshData();
         float platLen = cars * StationLayout.CarLength;
@@ -69,6 +74,8 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("Ballast", ballast.ToMesh(), MatLib.Get("Ballast"), transform);
         RailKit.MeshGO("Rail", rail.ToMesh(), MatLib.Get("Rail"), transform);
         RailKit.MeshGO("Tie", tie.ToMesh(), MatLib.Get("Tie"), transform);
+        RailKit.MeshGO("Switch", swMetal.ToMesh(), MatLib.Get("Switch"), transform);
+        RailKit.MeshGO("SwitchBox", swBox.ToMesh(), MatLib.Get("SwitchBox"), transform);
         RailKit.MeshGO("Platform", plat.ToMesh(), MatLib.Get("Platform"), transform);
         RailKit.MeshGO("Canopy", canopy.ToMesh(), MatLib.Get("Canopy"), transform);
         RailKit.MeshGO("House", house.ToMesh(), MatLib.Get("StationHouse"), transform);
@@ -109,6 +116,53 @@ public class Station : MonoBehaviour
             new Vector3((off + end) * 0.5f, 0, H + T * 0.5f),
             new Vector3(end, 0, H + T),
         };
+    }
+
+    // スロート(駅端の分岐部)に各停車線の分岐器を描く。metal=轍叉/トングレール/転てつ棒、
+    // box=転てつ機の黄箱、tie=長い分岐枕木。分岐位置を線ごとにずらしてラダー状に配置
+    void AddTurnouts(RailKit.MeshData metal, RailKit.MeshData box, RailKit.MeshData tie, float H, float T)
+    {
+        var stops = layout.stopTracks;
+        for (int k = 0; k < stops.Count; k++)
+        {
+            float off = layout.trackOffsets[stops[k]];
+            float end = (off >= 0 ? 1f : -1f) * 2.3f;   // LocalTrackPathの収束点x
+            for (int sgn = -1; sgn <= 1; sgn += 2)
+            {
+                // 収束点C→スロート中間Mを結ぶ線上の、線ごとにずらした位置に分岐器を置く
+                var C = new Vector3(end, 0, sgn * (H + T));
+                var M = new Vector3((off + end) * 0.5f, 0, sgn * (H + T * 0.5f));
+                float u = Mathf.Clamp01(0.32f + 0.13f * k);
+                var P = Vector3.Lerp(C, M, u);
+                var tan = (M - C); tan.y = 0;
+                if (tan.sqrMagnitude < 1e-4f) tan = new Vector3(0, 0, -sgn);
+                tan.Normalize();
+                var perp = new Vector3(-tan.z, 0, tan.x);
+                var rot = Quaternion.LookRotation(tan, Vector3.up);
+                float side = off >= 0 ? 1f : -1f;
+
+                // 轍叉(クロッシング): レール高さの金属ブロック
+                RailKit.AddBox(metal, P + Vector3.up * 0.44f, new Vector3(0.55f, 0.3f, 3.4f), rot);
+                // トングレール(先端が細る可動レール)を左右に
+                RailKit.AddBox(metal, P + perp * 0.75f + tan * -1.8f + Vector3.up * 0.46f, new Vector3(0.12f, 0.18f, 3.6f), rot);
+                RailKit.AddBox(metal, P - perp * 0.75f + tan * -1.8f + Vector3.up * 0.46f, new Vector3(0.12f, 0.18f, 3.6f), rot);
+                // 分岐枕木(通常より長い): 前後に数本
+                for (int j = -2; j <= 2; j++)
+                    RailKit.AddBox(tie, P + tan * (j * 1.05f) + Vector3.up * 0.28f, new Vector3(4.4f, 0.12f, 0.26f), rot);
+
+                // 転てつ機(黄箱)を軌道脇に + てこ + 転てつ棒
+                var mach = P + perp * (2.6f * side);
+                RailKit.AddBox(box, mach + Vector3.up * 0.42f, new Vector3(0.9f, 0.72f, 1.3f), rot);
+                RailKit.AddBox(metal, mach + Vector3.up * 0.95f, new Vector3(0.14f, 0.5f, 0.14f), rot * Quaternion.Euler(0, 0, 22f));
+                var rodEnd = P + perp * (0.9f * side);
+                var mid = (mach + rodEnd) * 0.5f;
+                var rdir = rodEnd - mach; rdir.y = 0;
+                float rlen = rdir.magnitude;
+                if (rlen > 0.1f)
+                    RailKit.AddBox(metal, mid + Vector3.up * 0.34f, new Vector3(0.08f, 0.08f, rlen),
+                        Quaternion.LookRotation(rdir.normalized, Vector3.up));
+            }
+        }
     }
 
     public Vector3 TrackWorldPoint(int trackIdx, float z)

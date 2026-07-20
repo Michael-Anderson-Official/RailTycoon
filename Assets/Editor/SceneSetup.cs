@@ -28,6 +28,8 @@ public static class SceneSetup
         Mat("Ballast", Hex("8A8577"), 0f, 0.1f);
         Mat("Rail", Hex("A8B0B8"), 0.85f, 0.6f);
         Mat("Tie", Hex("4C453C"), 0f, 0.1f);
+        Mat("Switch", Hex("6E7378"), 0.7f, 0.5f);   // 分岐器の金属(轍叉・トングレール)
+        Mat("SwitchBox", Hex("C8A030"), 0.2f, 0.4f); // 転てつ機(黄色い箱)
         Mat("Platform", Hex("CCC6B8"), 0f, 0.2f);
         Mat("Canopy", Hex("5E6B77"), 0.3f, 0.4f);
         Mat("StationHouse", Hex("DAD5CA"), 0f, 0.3f);
