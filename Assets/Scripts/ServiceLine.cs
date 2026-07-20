@@ -40,7 +40,7 @@ public class ServiceLine
         {
             int n = 0;
             foreach (var t in Object.FindObjectsByType<Train>(FindObjectsSortMode.None))
-                if (t.lineId == id) n++;
+                if (t.lineIds != null && t.lineIds.Contains(id)) n++;
             return n;
         }
     }

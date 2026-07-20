@@ -36,12 +36,12 @@ public static class ServiceTest
 
         // --- 配車: 4両を2本 ---
         bc.selFormation = TrainCatalog.Formations[5];
-        bc.selLine = line;
+        bc.selLines.Add(line);
         bc.DispatchTrain();
         bc.DispatchTrain();
         var trains = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
         bool dispatchOk = trains.Length == 2;
-        foreach (var t in trains) if (t.lineId != line.id) dispatchOk = false;
+        foreach (var t in trains) if (t.lineIds == null || !t.lineIds.Contains(line.id)) dispatchOk = false;
         Debug.Log("ServiceTest: dispatch trains=" + trains.Length + " lineTrainCount=" + line.TrainCount);
         pass &= dispatchOk && line.TrainCount == 2;
 
@@ -55,7 +55,7 @@ public static class ServiceTest
         bool loadOk = loaded && Services.lines.Count == 1 && Services.lines[0].typeIdx == 0
             && Services.lines[0].route.Count == 3 && trains2.Length == 2;
         var line2 = Services.lines.Count > 0 ? Services.lines[0] : null;
-        if (line2 != null) foreach (var t in trains2) if (t.lineId != line2.id) loadOk = false;
+        if (line2 != null) foreach (var t in trains2) if (t.lineIds == null || !t.lineIds.Contains(line2.id)) loadOk = false;
         Debug.Log("ServiceTest: reload loaded=" + loaded + " lines=" + Services.lines.Count
             + " trains=" + trains2.Length + " lineTrainCount=" + (line2 != null ? line2.TrainCount : -1));
         pass &= loadOk;
@@ -68,6 +68,29 @@ public static class ServiceTest
         Debug.Log("ServiceTest: delete lines=" + Services.lines.Count + " trains=" + trains3.Length
             + " refund=" + ((GameState.money - before) / 1e8).ToString("F2") + "億円");
         pass &= delOk;
+
+        // --- 複数系統の運用: 各停A→B→C と 各停C→B→A を連結 ---
+        // 上でセーブ全消去したので、復元後の駅を使う
+        var ra = TrackNetwork.stations[0];
+        var rb = TrackNetwork.stations[1];
+        var rc = TrackNetwork.stations[2];
+        var lFwd = new ServiceLine { id = ++Services.idCounter, typeIdx = 3, route = new List<Station> { ra, rb, rc }, tracks = new List<int> { ra.StopTracks[0], rb.StopTracks[0], rc.StopTracks[0] } };
+        var lBack = new ServiceLine { id = ++Services.idCounter, typeIdx = 3, route = new List<Station> { rc, rb, ra }, tracks = new List<int> { rc.StopTracks[0], rb.StopTracks[0], ra.StopTracks[0] } };
+        Services.lines.Add(lFwd); Services.lines.Add(lBack);
+        BuildController.BuildItinerary(new List<ServiceLine> { lFwd, lBack }, out var itRoute, out var itTracks, out var itIds);
+        // A,B,C + (Cスキップ)B,A → A,B,C,B,A → 先頭末尾A重複マージ → A,B,C,B (4駅), 2系統
+        bool itinOk = itRoute.Count == 4 && itIds.Count == 2 && itTracks.Count == 4;
+        Debug.Log("ServiceTest: itinerary route=" + itRoute.Count + " lines=" + itIds.Count);
+        pass &= itinOk;
+
+        bc.selFormation = TrainCatalog.Formations[5];
+        bc.selLines.Clear(); bc.selLines.Add(lFwd); bc.selLines.Add(lBack);
+        bc.DispatchTrain();
+        var mt = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
+        bool multiOk = mt.Length == 1 && mt[0].lineIds.Count == 2 && mt[0].route.Count == 4 && mt[0].cyclic;
+        Debug.Log("ServiceTest: multiline train=" + mt.Length + " lineIds=" + (mt.Length > 0 ? mt[0].lineIds.Count : -1)
+            + " routeLen=" + (mt.Length > 0 ? mt[0].route.Count : -1) + " cyclic=" + (mt.Length > 0 && mt[0].cyclic));
+        pass &= multiOk;
 
         Debug.Log("ServiceTest: " + (pass ? "PASS" : "FAIL"));
         PlayerPrefs.DeleteKey("railtycoon_save");

@@ -22,7 +22,7 @@ public class UIController : MonoBehaviour
     InputField renameInput;
     // 列車パネル(タブ制): 系統をつくる / 列車を配置
     GameObject serviceTab, dispatchView, lineListView, createView;
-    RectTransform lineListRows, dispatchLineRows;
+    RectTransform lineListRows, dispatchLineRows, itineraryRows;
     Image tabServiceBtn, tabDispatchBtn;
     Image[] typeBtns;
     readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
@@ -234,7 +234,7 @@ public class UIController : MonoBehaviour
         var rt = p.rectTransform;
         rt.pivot = new Vector2(1, 0.5f);
         rt.anchoredPosition = new Vector2(-8, 40);
-        rt.sizeDelta = new Vector2(362, 900);
+        rt.sizeDelta = new Vector2(362, 968);
         trainPanel = p.gameObject;
 
         tabServiceBtn = Btn("TabS", p.transform, "系統をつくる", 23, new Vector2(0, 1), new Vector2(0.5f, 1), new Vector2(10, -62), new Vector2(-3, -10), () => SetTab(0));
@@ -277,23 +277,53 @@ public class UIController : MonoBehaviour
     void BuildDispatchView(Transform parent)
     {
         float y = -2;
-        Label("DT", parent, "編成を選ぶ", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 30), new Vector2(-2, y), TextAnchor.MiddleLeft);
-        y -= 38;
+        Label("DT", parent, "編成を選ぶ", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 28), new Vector2(-2, y), TextAnchor.MiddleLeft);
+        y -= 34;
         foreach (var fm in TrainCatalog.Formations)
         {
             var f = fm;
-            var img = Btn("F" + f.Label, parent, f.Label + "  " + (f.CostYen / 1e8).ToString("F0") + "億円", 22,
-                new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 50), new Vector2(0, y), () => SelectFormation(f));
+            var img = Btn("F" + f.Label, parent, f.Label + "  " + (f.CostYen / 1e8).ToString("F0") + "億円", 21,
+                new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 46), new Vector2(0, y), () => SelectFormation(f));
             fmBtns.Add(new KeyValuePair<TrainCatalog.Formation, Image>(f, img));
-            y -= 56;
+            y -= 50;
         }
-        fmInfoText = Label("FmInfo", parent, "編成を選択してください", 20, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 44), new Vector2(-2, y), TextAnchor.UpperLeft);
-        y -= 52;
-        Label("DLT", parent, "配属する系統を選ぶ", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 30), new Vector2(-2, y), TextAnchor.MiddleLeft);
-        y -= 38;
-        dispatchLineRows = Rect("DRows", parent, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 210), new Vector2(0, y));
-        y -= 218;
-        Btn("Dispatch", parent, "この系統に配置(購入)", 25, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 58), new Vector2(0, y), () => BC.DispatchTrain(), BtnActive);
+        fmInfoText = Label("FmInfo", parent, "編成を選択してください", 19, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 42), new Vector2(-2, y), TextAnchor.UpperLeft);
+        y -= 48;
+        Label("DLT", parent, "系統を運用に追加(タップ)", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 28), new Vector2(-2, y), TextAnchor.MiddleLeft);
+        y -= 32;
+        dispatchLineRows = Rect("DRows", parent, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 150), new Vector2(0, y));
+        y -= 156;
+        Label("ITT", parent, "この列車の運用(順に走る)", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 28), new Vector2(-2, y), TextAnchor.MiddleLeft);
+        y -= 32;
+        itineraryRows = Rect("ITRows", parent, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 176), new Vector2(0, y));
+        y -= 182;
+        Btn("Dispatch", parent, "この運用で配置(購入)", 24, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 54), new Vector2(0, y), () => BC.DispatchTrain(), BtnActive);
+    }
+
+    // 運用(順序付き)の行: 番号・種別色ラベル・上下・削除
+    void BuildItineraryRows()
+    {
+        if (itineraryRows == null) return;
+        for (int i = itineraryRows.childCount - 1; i >= 0; i--) Destroy(itineraryRows.GetChild(i).gameObject);
+        if (BC.selLines.Count == 0)
+        {
+            Label("ite", itineraryRows, "上の系統をタップして運用を組む", 19,
+                new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -52), new Vector2(-2, -2), TextAnchor.UpperLeft);
+            return;
+        }
+        float y = -2;
+        for (int i = 0; i < BC.selLines.Count; i++)
+        {
+            int idx = i;
+            var l = BC.selLines[i];
+            var tc = l.TypeColor;
+            Label("N" + i, itineraryRows, (i + 1) + ".", 20, new Vector2(0, 1), new Vector2(0.1f, 1), new Vector2(2, y - 46), new Vector2(0, y), TextAnchor.MiddleCenter);
+            Btn("IL" + i, itineraryRows, l.DisplayName, 18, new Vector2(0.1f, 1), new Vector2(0.62f, 1), new Vector2(0, y - 46), new Vector2(-2, y), () => { }, new Color(tc.r, tc.g, tc.b, 0.85f));
+            Btn("Up" + i, itineraryRows, "↑", 22, new Vector2(0.62f, 1), new Vector2(0.74f, 1), new Vector2(1, y - 46), new Vector2(-1, y), () => BC.MoveItinerary(idx, -1));
+            Btn("Dn" + i, itineraryRows, "↓", 22, new Vector2(0.74f, 1), new Vector2(0.86f, 1), new Vector2(1, y - 46), new Vector2(-1, y), () => BC.MoveItinerary(idx, 1));
+            Btn("Rm" + i, itineraryRows, "×", 22, new Vector2(0.86f, 1), new Vector2(1, 1), new Vector2(1, y - 46), new Vector2(0, y), () => BC.RemoveFromItinerary(idx), new Color(0.55f, 0.22f, 0.24f, 0.95f));
+            y -= 52;
+        }
     }
 
     void SetTab(int t)
@@ -328,6 +358,7 @@ public class UIController : MonoBehaviour
         else
         {
             BuildLineRows(dispatchLineRows, true);
+            BuildItineraryRows();
             foreach (var kv in fmBtns) kv.Value.color = kv.Key == BC.selFormation ? BtnActive : BtnBg;
         }
     }
@@ -350,9 +381,10 @@ public class UIController : MonoBehaviour
             string label = l.DisplayName + "  ×" + l.TrainCount + "本";
             if (forDispatch)
             {
-                var bg = l == BC.selLine ? BtnActive : new Color(tc.r, tc.g, tc.b, 0.85f);
-                Btn("L" + l.id, container, label, 20, new Vector2(0, 1), new Vector2(1, 1),
-                    new Vector2(0, y - 52), new Vector2(0, y), () => { BC.selLine = l; RefreshTrainPanel(); }, bg);
+                Btn("L" + l.id, container, "＋ " + label, 19, new Vector2(0, 1), new Vector2(1, 1),
+                    new Vector2(0, y - 46), new Vector2(0, y), () => BC.AddToItinerary(l), new Color(tc.r, tc.g, tc.b, 0.85f));
+                y -= 52;
+                continue;
             }
             else
             {

@@ -22,7 +22,7 @@ public class BuildController : MonoBehaviour
     public enum TrainSub { Manage, CreateLine, Dispatch }
     public TrainSub trainSub = TrainSub.Manage;
     public int newLineType = 3;      // 作成中の系統の種別(既定=普通)
-    public ServiceLine selLine;      // 配車で選択中の系統
+    public readonly List<ServiceLine> selLines = new List<ServiceLine>(); // 配車で組む運用(順に走る)
 
     public TrainCatalog.Formation selFormation;
     public readonly List<Station> routeSel = new List<Station>();
@@ -50,7 +50,7 @@ public class BuildController : MonoBehaviour
         ClearTrackSel();
         ClearRoute();
         trainSub = TrainSub.Manage;
-        selLine = null;
+        selLines.Clear();
         mode = m;
         if (UIController.I != null) UIController.I.OnModeChanged();
         if (m == Mode.Track) UIController.Toast("つなぎたい駅を2つ、順にタップ");
@@ -250,7 +250,7 @@ public class BuildController : MonoBehaviour
         }
         // この駅を含む運行系統は成立しないので廃止(列車は上でRouteHasにより撤去済み)
         int removedLines = Services.lines.RemoveAll(l => l.route.Contains(st));
-        if (selLine != null && !Services.lines.Contains(selLine)) selLine = null;
+        selLines.RemoveAll(l => !Services.lines.Contains(l));
         TrackNetwork.stations.Remove(st);
         DestroySafe(st.gameObject);
         GameState.Refund(refund);
@@ -367,7 +367,27 @@ public class BuildController : MonoBehaviour
     {
         if (trainSub == TrainSub.CreateLine) ClearRoute();
         trainSub = TrainSub.Manage;
-        selLine = null;
+        if (UIController.I != null) UIController.I.RefreshTrainPanel();
+    }
+
+    // --- 配車の運用(複数系統)を組み立てる操作 ---
+    public void AddToItinerary(ServiceLine l)
+    {
+        if (l != null) selLines.Add(l);
+        if (UIController.I != null) UIController.I.RefreshTrainPanel();
+    }
+
+    public void RemoveFromItinerary(int i)
+    {
+        if (i >= 0 && i < selLines.Count) selLines.RemoveAt(i);
+        if (UIController.I != null) UIController.I.RefreshTrainPanel();
+    }
+
+    public void MoveItinerary(int i, int delta)
+    {
+        int j = i + delta;
+        if (i < 0 || i >= selLines.Count || j < 0 || j >= selLines.Count) return;
+        var tmp = selLines[i]; selLines[i] = selLines[j]; selLines[j] = tmp;
         if (UIController.I != null) UIController.I.RefreshTrainPanel();
     }
 
@@ -382,7 +402,6 @@ public class BuildController : MonoBehaviour
     {
         ClearRoute();
         trainSub = TrainSub.CreateLine;
-        selLine = null;
         if (UIController.I != null) UIController.I.RefreshTrainPanel();
         UIController.Toast("種別を選び、停車駅を順にタップ→番線を選ぶ→「系統を保存」");
     }
@@ -423,20 +442,20 @@ public class BuildController : MonoBehaviour
         UIController.Toast(line.DisplayName + " を作成しました");
     }
 
-    // 系統を廃止。配属列車も撤去し半額払い戻し
+    // 系統を廃止。この系統を運用に含む列車も撤去し半額払い戻し
     public void DeleteLine(ServiceLine line)
     {
         if (line == null) return;
         double refund = 0; int n = 0;
         foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
         {
-            if (t.lineId != line.id) continue;
+            if (t.lineIds == null || !t.lineIds.Contains(line.id)) continue;
             refund += t.RefundValue; n++;
             t.ReleaseAll();
             DestroySafe(t.gameObject);
         }
         Services.lines.Remove(line);
-        if (selLine == line) selLine = null;
+        selLines.RemoveAll(l => l == line);
         GameState.Refund(refund);
         SaveLoad.Save();
         if (UIController.I != null) UIController.I.RefreshTrainPanel();
@@ -444,36 +463,63 @@ public class BuildController : MonoBehaviour
             + (n > 0 ? "(列車" + n + "本撤去・払戻" + (refund / 1e8).ToString("F1") + "億円)" : ""));
     }
 
-    // 選択中の編成を系統に配属して1本購入。経路上で最初に空いている番線に配置
+    // 運用(selLines)を1本の経路に連結。連続する重複駅と、先頭==末尾の折り返し駅をマージ
+    public static void BuildItinerary(List<ServiceLine> lines,
+        out List<Station> route, out List<int> tracks, out List<int> lineIds)
+    {
+        route = new List<Station>();
+        tracks = new List<int>();
+        lineIds = new List<int>();
+        foreach (var l in lines)
+        {
+            lineIds.Add(l.id);
+            for (int i = 0; i < l.route.Count; i++)
+            {
+                if (route.Count > 0 && route[route.Count - 1] == l.route[i]) continue;
+                route.Add(l.route[i]);
+                tracks.Add(l.tracks[i]);
+            }
+        }
+        while (route.Count >= 2 && route[0] == route[route.Count - 1])
+        {
+            route.RemoveAt(route.Count - 1);
+            tracks.RemoveAt(tracks.Count - 1);
+        }
+    }
+
+    // 組んだ運用に編成を1本配属して購入。経路上で最初に空く番線に投入
     public void DispatchTrain()
     {
-        var line = selLine;
         if (selFormation == null) { UIController.Toast("編成を選んでください"); return; }
-        if (line == null || line.route.Count < 2) { UIController.Toast("配属する系統を選んでください"); return; }
-        foreach (var s in line.route)
+        if (selLines.Count == 0) { UIController.Toast("運用に系統を1つ以上追加してください"); return; }
+        BuildItinerary(selLines, out var route, out var tracks, out var lineIds);
+        if (route.Count < 2) { UIController.Toast("停車駅が足りません"); return; }
+        foreach (var s in route)
             if (s.cars < selFormation.cars)
             {
                 UIController.Toast(s.stationName + "は" + s.cars + "両対応で" + selFormation.cars + "両は停まれません");
                 return;
             }
         int startIdx = -1, startTrack = -1;
-        for (int i = 0; i < line.route.Count; i++)
-            if (line.route[i].TryReserveSpecific(line.tracks[i])) { startIdx = i; startTrack = line.tracks[i]; break; }
-        if (startIdx < 0) { UIController.Toast("系統上に空いている番線がありません(先行列車を動かしてから)"); return; }
+        for (int i = 0; i < route.Count; i++)
+            if (route[i].TryReserveSpecific(tracks[i])) { startIdx = i; startTrack = tracks[i]; break; }
+        if (startIdx < 0) { UIController.Toast("経路上に空いている番線がありません(先行列車を動かしてから)"); return; }
         if (!GameState.Spend(selFormation.CostYen))
         {
-            line.route[startIdx].Release(startTrack);
+            route[startIdx].Release(startTrack);
             UIController.Toast("資金不足(" + (selFormation.CostYen / 1e8).ToString("F1") + "億円必要)");
             return;
         }
         var go = new GameObject("Train_" + selFormation.Label);
         go.transform.SetParent(WorldRoot, false);
         var t = go.AddComponent<Train>();
-        t.Init(selFormation, new List<Station>(line.route), new List<int>(line.tracks), startIdx, 1);
-        t.lineId = line.id;
+        t.Init(selFormation, route, tracks, startIdx, 1);
+        t.lineIds = lineIds;
         SaveLoad.Save();
         if (UIController.I != null) UIController.I.RefreshTrainPanel();
-        UIController.Toast(line.DisplayName + " に " + selFormation.Label + " を配置!");
+        string names = "";
+        foreach (var l in selLines) names += (names.Length > 0 ? "→" : "") + l.TypeName;
+        UIController.Toast(selFormation.Label + " を配置(運用: " + names + ")");
     }
 
     public void ClearRoute()

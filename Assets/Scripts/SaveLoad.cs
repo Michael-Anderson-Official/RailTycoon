@@ -31,7 +31,8 @@ public static class SaveLoad
         public int[] route;
         public int[] tracks;
         public int idx, dir;
-        public int lineId = -1;
+        public int lineId = -1;   // 旧セーブ互換(単一系統)。読み込み時にlineIdsへ移行
+        public int[] lineIds;
     }
 
     [Serializable]
@@ -133,7 +134,7 @@ public static class SaveLoad
                 tracks = tracks,
                 idx = Mathf.Clamp(t.idx, 0, r.Count - 1),
                 dir = t.dir,
-                lineId = t.lineId,
+                lineIds = t.lineIds != null ? t.lineIds.ToArray() : null,
             });
         }
         PlayerPrefs.SetString(Key, JsonUtility.ToJson(d));
@@ -250,7 +251,9 @@ public static class SaveLoad
                 go.transform.SetParent(BuildController.WorldRoot, false);
                 var trn = go.AddComponent<Train>();
                 trn.Init(fm, route, tracks, startIdx, td.dir);
-                trn.lineId = td.lineId;
+                if (td.lineIds != null && td.lineIds.Length > 0) trn.lineIds = new List<int>(td.lineIds);
+                else if (td.lineId >= 0) trn.lineIds = new List<int> { td.lineId }; // 旧セーブ移行
+                else trn.lineIds = new List<int>();
             }
         return true;
     }

@@ -8,7 +8,8 @@ public class Train : MonoBehaviour
     public TrainCatalog.Formation fm;
     public List<Station> route;
     public List<int> routeTracks; // 各停車駅で入る番線(trackIdx)。routeと同じ長さ
-    public int lineId = -1;       // 配属先の運行系統ID(-1=無所属)
+    public List<int> lineIds = new List<int>(); // 配属先の運行系統ID列(運用。順に走る)
+    public bool cyclic;           // 経路末尾が先頭に直結するなら巡回、そうでなければ折返し
 
     public int idx;      // 現在(または直前に発った)駅のindex
     public int dir = 1;  // 進行方向(route上)
@@ -42,6 +43,8 @@ public class Train : MonoBehaviour
         fm = formation;
         route = stations;
         routeTracks = tracks;
+        // 経路末尾が先頭に直結していれば巡回(行き/帰りで別パターン等)。無ければ折返し
+        cyclic = route.Count >= 2 && TrackNetwork.Connected(route[route.Count - 1], route[0]);
         idx = Mathf.Clamp(startIdx, 0, route.Count - 1);
         dir = idx >= route.Count - 1 ? -1 : (idx <= 0 ? 1 : (dirInit >= 0 ? 1 : -1));
         int startTrack = routeTracks[idx];
@@ -96,11 +99,20 @@ public class Train : MonoBehaviour
     void TryDepart()
     {
         var cur = route[idx];
-        int next = idx + dir;
-        if (next < 0 || next >= route.Count)
+        int next;
+        if (cyclic)
         {
-            dir = -dir;
+            dir = 1;
+            next = (idx + 1) % route.Count;   // 末尾→先頭へループ
+        }
+        else
+        {
             next = idx + dir;
+            if (next < 0 || next >= route.Count)
+            {
+                dir = -dir;
+                next = idx + dir;
+            }
         }
         var to = route[next];
         var seg = TrackNetwork.Find(cur, to);
