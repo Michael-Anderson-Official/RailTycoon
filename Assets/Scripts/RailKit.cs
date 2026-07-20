@@ -150,21 +150,32 @@ public static class RailKit
         return cur;
     }
 
-    // 1本の線路(バラスト+レール2本+枕木)をMeshDataに追加
+    public const float Gauge = 0.7175f;   // 軌間1.435mの半分
+    public const float RailTop = 0.55f;    // レール頭頂の高さ
+    public const float TieSpacing = 0.95f; // 枕木の間隔(実物~0.6mを少し粗く)
+
+    // 1本の線路(バラスト肩+枕木+2本レール)をMeshDataに追加。よりリアルな断面
     public static void AddTrack(MeshData ballast, MeshData rail, MeshData tie, List<Vector3> center)
     {
-        AddSlab(ballast, center, 1.9f, 0.25f, 0.35f);
-        AddSlab(rail, Offset(center, 0.75f), 0.05f, 0.45f, 0.15f);
-        AddSlab(rail, Offset(center, -0.75f), 0.05f, 0.45f, 0.15f);
+        // バラスト: 幅広の低い基部 + その上に枕木が載る一段高い天端(=肩のある台形)
+        AddSlab(ballast, center, 2.5f, 0.22f, 0.22f);
+        AddSlab(ballast, center, 1.95f, 0.36f, 0.16f);
+
         float total = PathLength(center);
         var cum = Cumulative(center);
-        for (float s = 1.5f; s < total; s += 4f)
+        // 枕木(密に敷く)。バラスト天端に半分埋まる高さ
+        for (float s = 0.6f; s < total; s += TieSpacing)
         {
             Vector3 p, f;
             Sample(center, cum, s, out p, out f);
-            AddBox(tie, p + Vector3.up * 0.28f, new Vector3(2.3f, 0.12f, 0.25f),
+            AddBox(tie, p + Vector3.up * 0.34f, new Vector3(2.6f, 0.17f, 0.26f),
                 Quaternion.LookRotation(f, Vector3.up));
         }
+        // レール(枕木の上に立つ。頭部・腹部の2段で断面らしく)
+        AddSlab(rail, Offset(center, Gauge), 0.045f, RailTop, 0.16f);
+        AddSlab(rail, Offset(center, Gauge), 0.075f, RailTop - 0.13f, 0.05f);   // 底部フランジ
+        AddSlab(rail, Offset(center, -Gauge), 0.045f, RailTop, 0.16f);
+        AddSlab(rail, Offset(center, -Gauge), 0.075f, RailTop - 0.13f, 0.05f);
     }
 
     public static float[] Cumulative(List<Vector3> pts)

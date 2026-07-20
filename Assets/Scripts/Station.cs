@@ -50,10 +50,10 @@ public class Station : MonoBehaviour
         for (int i = 0; i < layout.trackOffsets.Length; i++)
             RailKit.AddTrack(ballast, rail, tie, RailKit.Chaikin(LocalTrackPath(i), 2)); // 平滑化して隙間をなくす
 
-        // スロートの分岐器(転てつ機・轍叉・分岐枕木)
+        // スロートの分岐器(両渡り線=シザースクロッシング)
         var swMetal = new RailKit.MeshData();
         var swBox = new RailKit.MeshData();
-        AddTurnouts(swMetal, swBox, tie, H, T);
+        AddTurnouts(swMetal, swBox, tie, ballast, rail, H, T);
 
         var plat = new RailKit.MeshData();
         var canopy = new RailKit.MeshData();
@@ -118,61 +118,98 @@ public class Station : MonoBehaviour
         };
     }
 
-    // スロート(駅端の分岐部)に、左右本線(±2.3)を結ぶ渡り線をX字に交差させて描く。
-    // 2本のレールが交差する轍叉(クロッシング)+トングレール+転てつ機。
-    void AddTurnouts(RailKit.MeshData metal, RailKit.MeshData box, RailKit.MeshData tie, float H, float T)
+    // スロートに両渡り線(シザースクロッシング)を実物の部品構成で描く。
+    // 直進本線レール + 交差する2本の渡り線(中央=ダイヤモンドクロッシングのX) +
+    // 各分岐のフログ(轍叉V)・トングレール・ガードレール・長い分岐枕木・転てつ機。
+    void AddTurnouts(RailKit.MeshData metal, RailKit.MeshData box, RailKit.MeshData tie,
+        RailKit.MeshData ballast, RailKit.MeshData rail, float H, float T)
     {
-        const float railY = 0.46f, gauge = 0.72f, half = 2.3f;
-        // 左右どちらにも停車線があるとき(=渡り線が成立するとき)だけ描く
         bool hasL = false, hasR = false;
         foreach (int idx in layout.stopTracks)
         {
             if (layout.trackOffsets[idx] < 0) hasL = true; else hasR = true;
         }
-        if (!(hasL && hasR)) return;
+        if (!(hasL && hasR)) return;    // 左右両側に線があるときだけ渡り線を描く
 
+        const float half = 2.3f;
+        float g = RailKit.Gauge, ry = RailKit.RailTop;
         for (int sgn = -1; sgn <= 1; sgn += 2)
         {
-            float zc = sgn * (H + T * 0.55f);   // 渡り線の中心z
-            float L = 8f;                        // 交差の半分の長さ(z方向)
-            var La = new Vector3(-half, 0, zc - sgn * L);  // 左線 手前
-            var Lb = new Vector3(+half, 0, zc + sgn * L);  // 右線 奥  (左→右へ渡るレール)
-            var Ra = new Vector3(+half, 0, zc - sgn * L);
-            var Rb = new Vector3(-half, 0, zc + sgn * L);  // 右→左へ渡るレール
-            AddCrossRail(metal, La, Lb, railY, gauge);
-            AddCrossRail(metal, Ra, Rb, railY, gauge);
-            // 交差中心の轍叉ノーズ
-            RailKit.AddBox(metal, new Vector3(0, railY - 0.02f, zc), new Vector3(1.0f, 0.22f, 1.4f), Quaternion.identity);
-            // 渡り線の枕木(左右本線をまたぐ長い枕木)
-            for (int j = -4; j <= 4; j++)
-                RailKit.AddBox(tie, new Vector3(0, 0.28f, zc + j * 1.5f), new Vector3(6.4f, 0.12f, 0.26f), Quaternion.identity);
-            // トングレール(各本線の交差手前に可動レール)+転てつ機を4隅に
-            AddPoint(metal, box, new Vector3(-half, 0, zc - sgn * L), sgn, +1);
-            AddPoint(metal, box, new Vector3(+half, 0, zc - sgn * L), sgn, -1);
+            float d = 10f;                       // 渡り線の半分の長さ(z)
+            float zc = sgn * (H + T * 0.5f);      // 中心
+            float zA = zc - sgn * d, zB = zc + sgn * d;
+
+            // バラスト(渡り線一帯を一枚で敷く)
+            var cp = new List<Vector3> { new Vector3(0, 0, zA - sgn * 3f), new Vector3(0, 0, zB + sgn * 3f) };
+            RailKit.AddSlab(ballast, cp, 3.7f, 0.36f, 0.16f);
+
+            // 分岐枕木: 左右本線をまたぐ長い枕木。中央ほど長い
+            int nT = Mathf.Max(4, Mathf.CeilToInt(d * 2 / RailKit.TieSpacing));
+            for (int i = 0; i <= nT; i++)
+            {
+                float z = Mathf.Lerp(zA, zB, i / (float)nT);
+                float w = Mathf.Lerp(5.4f, 7.0f, 1f - Mathf.Abs(z - zc) / d);
+                RailKit.AddBox(tie, new Vector3(0, 0.34f, z), new Vector3(w, 0.17f, 0.26f), Quaternion.identity);
+            }
+
+            // 直進する本線レール(渡り線区間を貫く)
+            StraightRails(rail, -half, zA - sgn * 4f, zB + sgn * 4f, g, ry);
+            StraightRails(rail, +half, zA - sgn * 4f, zB + sgn * 4f, g, ry);
+
+            // 交差する2本の渡り線 → 中央でX(ダイヤモンドクロッシング)
+            var A1 = new Vector3(-half, 0, zA); var B1 = new Vector3(+half, 0, zB);
+            var A2 = new Vector3(+half, 0, zA); var B2 = new Vector3(-half, 0, zB);
+            DiagRails(rail, A1, B1, g, ry);
+            DiagRails(rail, A2, B2, g, ry);
+
+            // 中央のダイヤモンドクロッシング(轍叉ノーズ+ウイングレール)
+            RailKit.AddBox(metal, new Vector3(0, ry - 0.02f, zc), new Vector3(1.3f, 0.2f, 1.4f), Quaternion.identity);
+            RailKit.AddBox(metal, new Vector3(0, ry - 0.02f, zc), new Vector3(1.4f, 0.2f, 1.3f), Quaternion.identity);
+
+            // 4か所の分岐(トングレール+フログ+ガードレール+転てつ機)
+            Point(metal, box, A1, sgn, -1, g, ry); // 左本線 手前
+            Point(metal, box, B2, sgn, -1, g, ry); // 左本線 奥
+            Point(metal, box, A2, sgn, +1, g, ry); // 右本線 手前
+            Point(metal, box, B1, sgn, +1, g, ry); // 右本線 奥
         }
     }
 
-    // p0→p1へ渡るレール(左右2本の平行レール)を1本の渡りレールとして描く
-    static void AddCrossRail(RailKit.MeshData metal, Vector3 p0, Vector3 p1, float railY, float gauge)
+    // 直線本線のレール2本(x±g、z0..z1)
+    static void StraightRails(RailKit.MeshData rail, float x, float z0, float z1, float g, float ry)
     {
-        var dir = p1 - p0; dir.y = 0;
-        float len = dir.magnitude;
-        if (len < 0.1f) return;
-        var rot = Quaternion.LookRotation(dir.normalized, Vector3.up);
-        var mid = (p0 + p1) * 0.5f + Vector3.up * railY;
-        var perp = new Vector3(-dir.z, 0, dir.x).normalized;
-        RailKit.AddBox(metal, mid + perp * gauge, new Vector3(0.13f, 0.16f, len), rot);
-        RailKit.AddBox(metal, mid - perp * gauge, new Vector3(0.13f, 0.16f, len), rot);
+        float len = Mathf.Abs(z1 - z0), zm = (z0 + z1) * 0.5f;
+        RailKit.AddBox(rail, new Vector3(x + g, ry, zm), new Vector3(0.09f, 0.16f, len), Quaternion.identity);
+        RailKit.AddBox(rail, new Vector3(x - g, ry, zm), new Vector3(0.09f, 0.16f, len), Quaternion.identity);
     }
 
-    // 本線側のトングレール(先細り風)と、脇の転てつ機(黄箱+てこ+転てつ棒)
-    static void AddPoint(RailKit.MeshData metal, RailKit.MeshData box, Vector3 at, int sgn, int outX)
+    // 渡り線のレール2本(a→b、両側にg)
+    static void DiagRails(RailKit.MeshData rail, Vector3 a, Vector3 b, float g, float ry)
+    {
+        var dir = b - a; dir.y = 0; float len = dir.magnitude;
+        if (len < 0.1f) return;
+        dir /= len;
+        var perp = new Vector3(-dir.z, 0, dir.x);
+        var rot = Quaternion.LookRotation(dir, Vector3.up);
+        var mid = (a + b) * 0.5f + Vector3.up * ry;
+        RailKit.AddBox(rail, mid + perp * g, new Vector3(0.09f, 0.16f, len), rot);
+        RailKit.AddBox(rail, mid - perp * g, new Vector3(0.09f, 0.16f, len), rot);
+    }
+
+    // 1か所の分岐: トングレール(先細り)・フログ・ガードレール・転てつ機。at=本線側の分岐点
+    static void Point(RailKit.MeshData metal, RailKit.MeshData box, Vector3 at, int sgn, int outX, float g, float ry)
     {
         var fwd = new Vector3(0, 0, sgn);
         var rot = Quaternion.LookRotation(fwd, Vector3.up);
-        // トングレール
-        RailKit.AddBox(metal, at + Vector3.up * 0.46f - fwd * 3f, new Vector3(0.11f, 0.16f, 5f), rot);
-        // 転てつ機を本線の外側に
+        float railY = ry;
+        // トングレール(可動レール): 本線内側に沿う短いレール
+        RailKit.AddBox(metal, at + new Vector3(-outX * g, 0, 0) + fwd * 3.5f + Vector3.up * railY,
+            new Vector3(0.1f, 0.15f, 5.5f), rot);
+        // フログ(轍叉V)ブロック
+        RailKit.AddBox(metal, at + Vector3.up * (railY - 0.02f), new Vector3(0.55f, 0.2f, 1.6f), rot);
+        // ガードレール(フログ反対側、本線内側)
+        RailKit.AddBox(metal, at + new Vector3(outX * (g - 0.18f), 0, 0) + Vector3.up * railY,
+            new Vector3(0.08f, 0.15f, 3.2f), rot);
+        // 転てつ機(本線の外側) + てこ + 転てつ棒
         var mach = at + new Vector3(2.4f * outX, 0, 0);
         RailKit.AddBox(box, mach + Vector3.up * 0.42f, new Vector3(0.9f, 0.72f, 1.3f), rot);
         RailKit.AddBox(metal, mach + Vector3.up * 0.95f, new Vector3(0.14f, 0.5f, 0.14f), rot * Quaternion.Euler(0, 0, 22f));
