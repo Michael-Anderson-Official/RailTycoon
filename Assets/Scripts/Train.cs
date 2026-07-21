@@ -50,9 +50,9 @@ public class Train : MonoBehaviour
         int startTrack = routeTracks[idx];
         curTrack = startTrack;
         carTs = TrainVisual.BuildCars(transform, fm);
-        // 開始駅のホームに据え付け
+        // 開始駅のホームに据え付け(先頭が停止位置目標に来る)
         var st = route[idx];
-        float h = HalfTrain + 2f;
+        float h = HalfTrain;
         path = RailKit.Chaikin(new List<Vector3>
         {
             st.TrackWorldPoint(startTrack, -h),
@@ -244,7 +244,7 @@ public class Train : MonoBehaviour
             if (st.TryReserve(out alt)) { track = alt; routeTracks[idx] = alt; }
         }
         curTrack = track;
-        float h = HalfTrain + 2f;
+        float h = HalfTrain;   // 先頭がN両の停止位置目標(±N*車長/2)に来るよう据え付け
         path = RailKit.Chaikin(new List<Vector3>
         {
             st.TrackWorldPoint(track, -h),

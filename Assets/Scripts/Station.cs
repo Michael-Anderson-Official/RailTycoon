@@ -200,12 +200,14 @@ public class Station : MonoBehaviour
                 for (int sgn = -1; sgn <= 1; sgn += 2)
                 {
                     float z = sgn * fz;
-                    // 線路中央(レール間)に低く据え置き。列車は上を通過する
-                    RailKit.AddBox(frame, new Vector3(off, 0.32f, z), new Vector3(0.62f, 0.28f, 0.7f), Quaternion.identity);
-                    RailKit.AddBox(plate, new Vector3(off, 0.56f, z), new Vector3(0.52f, 0.42f, 0.16f), Quaternion.identity);
-                    // 両数の数字(7セグ立体, 明色, 両面)
-                    AddDigits(digit, n, new Vector3(off, 0.57f, z + 0.09f), Quaternion.identity, 0.27f);
-                    AddDigits(digit, n, new Vector3(off, 0.57f, z - 0.09f), Quaternion.Euler(0, 180f, 0), 0.27f);
+                    // 線路中央(レール間)に低く据え置き。列車は上を通過する。
+                    // プレートは進来方向(-sgn側)へ約45°傾け、俯瞰でも数字が読める向きに(1面)
+                    var driverDir = new Vector3(0, 0.72f, -sgn * 0.69f).normalized;
+                    var rot = Quaternion.LookRotation(driverDir, Vector3.up);
+                    RailKit.AddBox(frame, new Vector3(off, 0.3f, z), new Vector3(0.64f, 0.28f, 0.66f), Quaternion.identity);
+                    var pc = new Vector3(off, 0.62f, z + sgn * 0.16f);
+                    RailKit.AddBox(plate, pc, new Vector3(0.62f, 0.6f, 0.07f), rot);
+                    AddDigits(digit, n, pc + driverDir * 0.06f, rot, 0.38f);
                 }
             }
         }
@@ -244,7 +246,7 @@ public class Station : MonoBehaviour
     {
         if ((mask & (1 << bit)) == 0) return;
         var size = horiz ? new Vector3(len, t, dep) : new Vector3(t, len, dep);
-        RailKit.AddBox(md, center + rot * new Vector3(lx, ly, 0), size, rot);
+        RailKit.AddBox(md, center + rot * new Vector3(-lx, ly, 0), size, rot); // 水平反転して正しい向きに
     }
 
     // 車止め1基。at=線路端(ローカル)、sign=どちらの端か(内向き=-sign*z)
