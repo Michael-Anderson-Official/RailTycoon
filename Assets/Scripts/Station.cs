@@ -178,8 +178,8 @@ public class Station : MonoBehaviour
     public Vector3 TrackWorldPoint(int trackIdx, float z)
         => transform.TransformPoint(new Vector3(layout.trackOffsets[trackIdx], 0, z));
 
-    // 両数ごとの停止位置目標(停止線+数字)を各停車線に置く。列車は中央停車なので
-    // N両編成の前端は ±N*車長/2。両方向ぶん置く
+    // 両数ごとの停止位置目標を各停車線の枕木上に据え置き型で置く。列車は中央停車なので
+    // N両編成の前端は ±N*車長/2。両方向ぶん、進来方向を向けて設置
     void AddStopMarkers()
     {
         var counts = new List<int>();
@@ -187,45 +187,73 @@ public class Station : MonoBehaviour
         if (counts.Count == 0 || counts[counts.Count - 1] != cars) counts.Add(cars);
         var root = new GameObject("StopMarkers");
         root.transform.SetParent(transform, false);
-        var bar = new RailKit.MeshData();
+        var frame = new RailKit.MeshData();   // 台座・支柱(金属)
+        var plate = new RailKit.MeshData();   // 黄プレート
+        var digit = new RailKit.MeshData();   // 数字(立体・不透明)
         float carL = StationLayout.CarLength;
         foreach (int trk in layout.stopTracks)
         {
             float off = layout.trackOffsets[trk];
-            // この線に隣接する最寄りホームの、線路側の縁(数字を置く)
-            float edge = off;
+            // 最寄りホーム側の軌道端へ寄せる(列車の車体幅±1.45を避けて据え置き)
+            float side = 1f;
             if (layout.platforms.Count > 0)
             {
                 var pl = layout.platforms[0]; float bd = 1e9f;
                 foreach (var p in layout.platforms) { float d = Mathf.Abs(p.x - off); if (d < bd) { bd = d; pl = p; } }
-                edge = pl.x + Mathf.Sign(off - pl.x) * (pl.y * 0.5f - 0.7f);
+                side = Mathf.Sign(pl.x - off);
             }
+            float mx = off + side * 1.65f;
             foreach (int n in counts)
             {
                 float fz = n * carL * 0.5f;
                 for (int sgn = -1; sgn <= 1; sgn += 2)
                 {
                     float z = sgn * fz;
-                    // 停止線(軌間をまたぐ黄色い細バー、線路上)
-                    RailKit.AddBox(bar, new Vector3(off, 0.5f, z), new Vector3(1.7f, 0.06f, 0.4f), Quaternion.identity);
-                    // 両数の数字はホーム上に平置き(車体を透けないようホーム側へ)
-                    var go = new GameObject("SP" + n);
-                    go.transform.SetParent(root.transform, false);
-                    go.transform.localPosition = new Vector3(edge, 1.14f, z);
-                    go.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-                    var tm = go.AddComponent<TextMesh>();
-                    tm.text = n.ToString();
-                    tm.font = MatLib.JpFont;
-                    tm.fontSize = 48;
-                    tm.characterSize = 0.5f;
-                    tm.anchor = TextAnchor.MiddleCenter;
-                    tm.alignment = TextAlignment.Center;
-                    tm.color = new Color(0.95f, 0.75f, 0.05f);
-                    go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
+                    RailKit.AddBox(frame, new Vector3(mx, 0.5f, z), new Vector3(0.5f, 0.5f, 0.5f), Quaternion.identity);
+                    RailKit.AddBox(frame, new Vector3(mx, 0.95f, z), new Vector3(0.1f, 0.7f, 0.1f), Quaternion.identity);
+                    RailKit.AddBox(plate, new Vector3(mx, 1.35f, z), new Vector3(0.62f, 0.6f, 0.1f), Quaternion.identity);
+                    // 両数の数字を7セグ風の立体で両面に(フォントは深度無視で床を透けるため)
+                    AddDigits(digit, n, new Vector3(mx, 1.35f, z + 0.06f), Quaternion.identity, 0.4f);
+                    AddDigits(digit, n, new Vector3(mx, 1.35f, z - 0.06f), Quaternion.Euler(0, 180f, 0), 0.4f);
                 }
             }
         }
-        RailKit.MeshGO("SPBar", bar.ToMesh(), MatLib.Get("SwitchBox"), root.transform);
+        RailKit.MeshGO("SPFrame", frame.ToMesh(), MatLib.Get("Switch"), root.transform);
+        RailKit.MeshGO("SPPlate", plate.ToMesh(), MatLib.Get("SwitchBox"), root.transform);
+        RailKit.MeshGO("SPDigit", digit.ToMesh(), MatLib.Get("TrainDark"), root.transform);
+    }
+
+    // 7セグメント風の立体数字。centerを中心、rotで向き、hが桁高さ
+    static readonly int[] SegMask = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F }; // 0-9: gfedcba
+    static void AddDigits(RailKit.MeshData md, int value, Vector3 center, Quaternion rot, float h)
+    {
+        string s = value.ToString();
+        float w = h * 0.58f, t = h * 0.15f, dep = 0.05f;
+        float spacing = w + t * 1.6f;
+        float x0 = -(s.Length - 1) * 0.5f * spacing;
+        for (int i = 0; i < s.Length; i++)
+        {
+            int d = s[i] - '0';
+            if (d < 0 || d > 9) continue;
+            int mask = SegMask[d];
+            float cx = x0 + i * spacing;
+            // a(top) b(TR) c(BR) d(bottom) e(BL) f(TL) g(mid) -> bit 0..6
+            AddSeg(md, mask, 0, center, rot, cx, h * 0.5f, w, t, dep, true);   // a
+            AddSeg(md, mask, 1, center, rot, cx + w * 0.5f, h * 0.25f, h * 0.5f, t, dep, false); // b
+            AddSeg(md, mask, 2, center, rot, cx + w * 0.5f, -h * 0.25f, h * 0.5f, t, dep, false); // c
+            AddSeg(md, mask, 3, center, rot, cx, -h * 0.5f, w, t, dep, true);  // d
+            AddSeg(md, mask, 4, center, rot, cx - w * 0.5f, -h * 0.25f, h * 0.5f, t, dep, false); // e
+            AddSeg(md, mask, 5, center, rot, cx - w * 0.5f, h * 0.25f, h * 0.5f, t, dep, false);  // f
+            AddSeg(md, mask, 6, center, rot, cx, 0, w, t, dep, true);          // g
+        }
+    }
+
+    static void AddSeg(RailKit.MeshData md, int mask, int bit, Vector3 center, Quaternion rot,
+        float lx, float ly, float len, float t, float dep, bool horiz)
+    {
+        if ((mask & (1 << bit)) == 0) return;
+        var size = horiz ? new Vector3(len, t, dep) : new Vector3(t, len, dep);
+        RailKit.AddBox(md, center + rot * new Vector3(lx, ly, 0), size, rot);
     }
 
     // 車止め1基。at=線路端(ローカル)、sign=どちらの端か(内向き=-sign*z)
