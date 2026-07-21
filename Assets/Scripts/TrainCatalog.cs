@@ -14,6 +14,8 @@ public static class TrainCatalog
         public float decelKmhs;     // 常用最大減速度 km/h/s(実車値)
         public float costPerCarOku; // 億円/両
         public Color body, stripe, front;
+        public Color band2;         // 窓下帯(未設定=stripeと同色)
+        public bool keio5000;       // 京王5000系(2代)専用の作り込みを使う
 
         public float Accel => accelKmhs / 3.6f; // m/s²
         public float Decel => decelKmhs / 3.6f;
@@ -39,7 +41,9 @@ public static class TrainCatalog
     {
         id = "keio5000", name = "京王5000系", capPerCar = 130, maxSpeedKmh = 110,
         accelKmhs = 3.3f, decelKmhs = 4.0f, costPerCarOku = 1.6f,
-        body = Hex("C9CDD2"), stripe = Hex("D6006F"), front = Hex("222A44"),
+        // ステンレス車体 / 窓上=京王レッド / 窓下=京王ブルー / 前面=黒
+        body = Hex("CFD3D7"), stripe = Hex("D6006F"), band2 = Hex("0064B4"), front = Hex("18181D"),
+        keio5000 = true,
     };
     public static readonly TrainTypeDef Mei2000 = new TrainTypeDef
     {
