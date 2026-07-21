@@ -187,40 +187,31 @@ public class Station : MonoBehaviour
         if (counts.Count == 0 || counts[counts.Count - 1] != cars) counts.Add(cars);
         var root = new GameObject("StopMarkers");
         root.transform.SetParent(transform, false);
-        var frame = new RailKit.MeshData();   // 台座・支柱(金属)
-        var plate = new RailKit.MeshData();   // 黄プレート
-        var digit = new RailKit.MeshData();   // 数字(立体・不透明)
+        var frame = new RailKit.MeshData();   // 低い基台(金属)
+        var plate = new RailKit.MeshData();   // 暗色プレート
+        var digit = new RailKit.MeshData();   // 数字(立体・不透明・明色)
         float carL = StationLayout.CarLength;
         foreach (int trk in layout.stopTracks)
         {
             float off = layout.trackOffsets[trk];
-            // 最寄りホーム側の軌道端へ寄せる(列車の車体幅±1.45を避けて据え置き)
-            float side = 1f;
-            if (layout.platforms.Count > 0)
-            {
-                var pl = layout.platforms[0]; float bd = 1e9f;
-                foreach (var p in layout.platforms) { float d = Mathf.Abs(p.x - off); if (d < bd) { bd = d; pl = p; } }
-                side = Mathf.Sign(pl.x - off);
-            }
-            float mx = off + side * 1.65f;
             foreach (int n in counts)
             {
                 float fz = n * carL * 0.5f;
                 for (int sgn = -1; sgn <= 1; sgn += 2)
                 {
                     float z = sgn * fz;
-                    RailKit.AddBox(frame, new Vector3(mx, 0.5f, z), new Vector3(0.5f, 0.5f, 0.5f), Quaternion.identity);
-                    RailKit.AddBox(frame, new Vector3(mx, 0.95f, z), new Vector3(0.1f, 0.7f, 0.1f), Quaternion.identity);
-                    RailKit.AddBox(plate, new Vector3(mx, 1.35f, z), new Vector3(0.62f, 0.6f, 0.1f), Quaternion.identity);
-                    // 両数の数字を7セグ風の立体で両面に(フォントは深度無視で床を透けるため)
-                    AddDigits(digit, n, new Vector3(mx, 1.35f, z + 0.06f), Quaternion.identity, 0.4f);
-                    AddDigits(digit, n, new Vector3(mx, 1.35f, z - 0.06f), Quaternion.Euler(0, 180f, 0), 0.4f);
+                    // 線路中央(レール間)に低く据え置き。列車は上を通過する
+                    RailKit.AddBox(frame, new Vector3(off, 0.32f, z), new Vector3(0.62f, 0.28f, 0.7f), Quaternion.identity);
+                    RailKit.AddBox(plate, new Vector3(off, 0.56f, z), new Vector3(0.52f, 0.42f, 0.16f), Quaternion.identity);
+                    // 両数の数字(7セグ立体, 明色, 両面)
+                    AddDigits(digit, n, new Vector3(off, 0.57f, z + 0.09f), Quaternion.identity, 0.27f);
+                    AddDigits(digit, n, new Vector3(off, 0.57f, z - 0.09f), Quaternion.Euler(0, 180f, 0), 0.27f);
                 }
             }
         }
         RailKit.MeshGO("SPFrame", frame.ToMesh(), MatLib.Get("Switch"), root.transform);
-        RailKit.MeshGO("SPPlate", plate.ToMesh(), MatLib.Get("SwitchBox"), root.transform);
-        RailKit.MeshGO("SPDigit", digit.ToMesh(), MatLib.Get("TrainDark"), root.transform);
+        RailKit.MeshGO("SPPlate", plate.ToMesh(), MatLib.Get("Tie"), root.transform);
+        RailKit.MeshGO("SPDigit", digit.ToMesh(), MatLib.Get("TrainLight"), root.transform);
     }
 
     // 7セグメント風の立体数字。centerを中心、rotで向き、hが桁高さ
