@@ -46,15 +46,45 @@ public static class TrainVisual
             var go = new GameObject("Car" + i);
             go.transform.SetParent(root, false);
 
-            // 車体(丸み断面の押し出し)
+            float[] doorZ = { -6.4f, -2.15f, 2.15f, 6.4f };
+
+            // 車体(丸み断面の押し出し)+ 窓柱(連続窓を個別窓に見せる)
             var body = new RailKit.MeshData();
             RailKit.AddExtrude(body, BodySection, -HalfLen, HalfLen);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float px = 1.452f * side;
+                for (float pz = -HalfLen + 1.0f; pz <= HalfLen - 1.0f; pz += 1.5f)
+                {
+                    bool nearDoor = false;
+                    foreach (float dz in doorZ) if (Mathf.Abs(pz - dz) < 1.05f) nearDoor = true;
+                    if (nearDoor) continue;
+                    RailKit.AddBox(body, new Vector3(px, 3.02f, pz), new Vector3(0.06f, 1.06f, 0.14f), Quaternion.identity);
+                }
+                // ドア枠(左右の縦桟, 車体色)
+                foreach (float dz in doorZ)
+                {
+                    RailKit.AddBox(body, new Vector3(px, 2.05f, dz + 0.7f), new Vector3(0.05f, 2.95f, 0.1f), Quaternion.identity);
+                    RailKit.AddBox(body, new Vector3(px, 2.05f, dz - 0.7f), new Vector3(0.05f, 2.95f, 0.1f), Quaternion.identity);
+                }
+            }
             RailKit.MeshGO("Body", body.ToMesh(), bodyMat, go.transform);
 
             // 屋根(緩い蒲鉾)を車体上にかぶせて滑らかに
             var roof = new RailKit.MeshData();
             RailKit.AddExtrude(roof, RoofSection(), -HalfLen + 0.15f, HalfLen - 0.15f);
             RailKit.MeshGO("Roof", roof.ToMesh(), roofMat, go.transform);
+
+            // 屋根上機器(冷房装置・配管)。俯瞰でよく見える
+            var equip = new RailKit.MeshData();
+            RailKit.AddBox(equip, new Vector3(0, 4.28f, 0), new Vector3(0.34f, 0.14f, CarLen - 1.2f), Quaternion.identity); // 配管
+            foreach (float ez in new[] { 4.7f, -4.7f })
+            {
+                RailKit.AddBox(equip, new Vector3(0, 4.36f, ez), new Vector3(2.0f, 0.32f, 3.0f), Quaternion.identity); // 冷房装置
+                RailKit.AddBox(equip, new Vector3(0.55f, 4.55f, ez), new Vector3(0.72f, 0.06f, 0.72f), Quaternion.identity); // ファン
+                RailKit.AddBox(equip, new Vector3(-0.55f, 4.55f, ez), new Vector3(0.72f, 0.06f, 0.72f), Quaternion.identity);
+            }
+            RailKit.MeshGO("Equip", equip.ToMesh(), pantoMat, go.transform);
 
             // 側面の窓帯(左右)・ドア・カラー帯
             var glass = new RailKit.MeshData();
@@ -63,14 +93,13 @@ public static class TrainVisual
             for (int side = -1; side <= 1; side += 2)
             {
                 float x = 1.455f * side;
-                // 連続窓帯
-                RailKit.AddBox(glass, new Vector3(x, 3.02f, 0), new Vector3(0.06f, 0.95f, CarLen - 2.2f), Quaternion.identity);
-                // ドア4枚(窓より暗い面+小窓)
-                float[] doorZ = { -6.4f, -2.15f, 2.15f, 6.4f };
+                // 連続窓帯(柱で個別窓に見える)
+                RailKit.AddBox(glass, new Vector3(x, 3.02f, 0), new Vector3(0.06f, 0.9f, CarLen - 2.2f), Quaternion.identity);
+                // ドア4枚(凹んだ暗色面+小窓+左右の縁)
                 foreach (float dz in doorZ)
                 {
-                    RailKit.AddBox(doors, new Vector3(x, 2.15f, dz), new Vector3(0.05f, 3.0f, 1.3f), Quaternion.identity);
-                    RailKit.AddBox(glass, new Vector3(x, 3.1f, dz), new Vector3(0.07f, 0.8f, 1.0f), Quaternion.identity);
+                    RailKit.AddBox(doors, new Vector3(x - 0.02f * side, 2.05f, dz), new Vector3(0.05f, 2.9f, 1.28f), Quaternion.identity);
+                    RailKit.AddBox(glass, new Vector3(x, 3.05f, dz), new Vector3(0.07f, 0.82f, 1.0f), Quaternion.identity);
                 }
                 // カラー帯(腰部)
                 RailKit.AddBox(stripe, new Vector3(x, 1.75f, 0), new Vector3(0.05f, 0.5f, CarLen - 0.4f), Quaternion.identity);
@@ -79,17 +108,24 @@ public static class TrainVisual
             RailKit.MeshGO("Doors", doors.ToMesh(), doorMat, go.transform);
             RailKit.MeshGO("Stripe", stripe.ToMesh(), stripeMat, go.transform);
 
-            // 床下機器+台車
+            // 床下機器+台車(側枠・車軸・車輪を作り込む)
             var under = new RailKit.MeshData();
-            RailKit.AddBox(under, new Vector3(0, 0.35f, 0), new Vector3(2.4f, 0.6f, CarLen - 5f), Quaternion.identity);
+            RailKit.AddBox(under, new Vector3(0, 0.42f, 0), new Vector3(2.5f, 0.62f, CarLen - 5f), Quaternion.identity); // 床下機器箱
+            RailKit.AddBox(under, new Vector3(1.15f, 0.5f, 2.5f), new Vector3(0.5f, 0.5f, 3.0f), Quaternion.identity);    // 補機
+            RailKit.AddBox(under, new Vector3(-1.1f, 0.45f, -3f), new Vector3(0.6f, 0.55f, 2.4f), Quaternion.identity);
             foreach (float bz in new[] { 6.2f, -6.2f })
             {
-                RailKit.AddBox(under, new Vector3(0, 0.5f, bz), new Vector3(2.5f, 0.5f, 2.6f), Quaternion.identity);
-                // 車輪
-                for (int w = 0; w < 2; w++)
+                // 台車枠(左右側枠+枕梁)
+                for (int side = -1; side <= 1; side += 2)
+                    RailKit.AddBox(under, new Vector3(1.02f * side, 0.5f, bz), new Vector3(0.16f, 0.42f, 2.9f), Quaternion.identity);
+                RailKit.AddBox(under, new Vector3(0, 0.62f, bz), new Vector3(2.1f, 0.3f, 0.7f), Quaternion.identity);
+                // 車軸+車輪(2軸)
+                foreach (float wz in new[] { 0.95f, -0.95f })
+                {
+                    RailKit.AddBox(under, new Vector3(0, 0.42f, bz + wz), new Vector3(2.0f, 0.16f, 0.16f), Quaternion.identity); // 車軸
                     for (int side = -1; side <= 1; side += 2)
-                        RailKit.AddBox(under, new Vector3(1.0f * side, 0.42f, bz + (w == 0 ? 0.9f : -0.9f)),
-                            new Vector3(0.2f, 0.84f, 0.84f), Quaternion.identity);
+                        RailKit.AddBox(under, new Vector3(1.02f * side, 0.42f, bz + wz), new Vector3(0.24f, 0.86f, 0.86f), Quaternion.identity); // 車輪
+                }
             }
             RailKit.MeshGO("Under", under.ToMesh(), underMat, go.transform);
 
@@ -140,27 +176,35 @@ public static class TrainVisual
         return md.ToMesh();
     }
 
-    // 傾斜した前面(車体色の枠+黒ガラス+ライト)。sign=+1で+z端、-1で-z端
+    // 傾斜した前面(車体色の枠+黒ガラス+ライト+スカート+連結器)。sign=+1で+z端、-1で-z端
     static void AddFace(Transform car, int sign, Material bodyMat, Material glassMat, TrainCatalog.TrainTypeDef t)
     {
         float z = HalfLen * sign;
         var frame = new RailKit.MeshData();
         var glass = new RailKit.MeshData();
         var lite = new RailKit.MeshData();
+        var dark = new RailKit.MeshData();
         var q = Quaternion.Euler(sign * 12f, sign > 0 ? 0 : 180f, 0); // 前面をわずかに傾ける
         Vector3 c = new Vector3(0, 2.4f, z + sign * 0.15f);
-        // 前面パネル(車体色)
-        RailKit.AddBox(frame, c + new Vector3(0, 0.9f, 0), new Vector3(2.7f, 1.7f, 0.3f), q);
-        RailKit.AddBox(frame, c + new Vector3(0, -1.4f, 0), new Vector3(2.7f, 1.1f, 0.3f), q);
+        // 前面パネル(車体色): 窓上・窓下
+        RailKit.AddBox(frame, c + new Vector3(0, 0.95f, 0), new Vector3(2.72f, 1.6f, 0.3f), q);
+        RailKit.AddBox(frame, c + new Vector3(0, -1.35f, 0), new Vector3(2.72f, 1.1f, 0.3f), q);
+        // 屋根と前面をつなぐ上部の丸み
+        RailKit.AddBox(frame, c + new Vector3(0, 1.7f, sign * -0.12f), new Vector3(2.45f, 0.5f, 0.3f),
+            q * Quaternion.Euler(sign * 22f, 0, 0));
         // 運転席ガラス
-        RailKit.AddBox(glass, c + new Vector3(0, 0.95f, sign * 0.05f), new Vector3(2.2f, 1.15f, 0.12f), q);
+        RailKit.AddBox(glass, c + new Vector3(0, 0.98f, sign * 0.06f), new Vector3(2.26f, 1.2f, 0.12f), q);
         // 前照灯・尾灯
         for (int side = -1; side <= 1; side += 2)
-            RailKit.AddBox(lite, c + new Vector3(0.85f * side, -0.55f, sign * 0.12f),
-                new Vector3(0.45f, 0.32f, 0.14f), q);
+            RailKit.AddBox(lite, c + new Vector3(0.88f * side, -0.5f, sign * 0.13f),
+                new Vector3(0.42f, 0.3f, 0.15f), q);
+        // スカート(前面下部カバー) + 連結器
+        RailKit.AddBox(frame, c + new Vector3(0, -2.1f, sign * 0.02f), new Vector3(2.5f, 0.95f, 0.32f), q);
+        RailKit.AddBox(dark, new Vector3(0, 0.78f, z + sign * 0.55f), new Vector3(0.5f, 0.36f, 0.8f), Quaternion.identity);
         RailKit.MeshGO("Face", frame.ToMesh(), bodyMat, car);
         RailKit.MeshGO("FaceGlass", glass.ToMesh(), glassMat, car);
-        RailKit.MeshGO("FaceLite", Recolor(lite.ToMesh()), MatLib.Get("TrainLight"), car);
+        RailKit.MeshGO("FaceLite", lite.ToMesh(), MatLib.Get("TrainLight"), car);
+        RailKit.MeshGO("FaceCoupler", dark.ToMesh(), MatLib.Get("TrainUnder"), car);
     }
 
     static void AddGangway(Transform car, int sign, Material mat)
@@ -170,8 +214,6 @@ public static class TrainVisual
             new Vector3(1.9f, 2.4f, 0.12f), Quaternion.identity);
         RailKit.MeshGO("Gangway", md.ToMesh(), mat, car);
     }
-
-    static Mesh Recolor(Mesh m) => m; // ライトは専用マテリアルで着色
 
     static Color Darken(Color c, float k) => new Color(c.r * k, c.g * k, c.b * k, c.a);
 }

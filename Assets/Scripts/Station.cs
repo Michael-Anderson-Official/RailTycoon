@@ -66,8 +66,6 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("Canopy", canopy.ToMesh(), MatLib.Get("Canopy"), transform);
         RailKit.MeshGO("House", house.ToMesh(), MatLib.Get("StationHouse"), transform);
 
-        AddStopMarkers();
-
         var col = gameObject.GetComponent<BoxCollider>();
         if (col == null) col = gameObject.AddComponent<BoxCollider>();
         col.center = new Vector3(0, 5, 0);
@@ -177,77 +175,6 @@ public class Station : MonoBehaviour
 
     public Vector3 TrackWorldPoint(int trackIdx, float z)
         => transform.TransformPoint(new Vector3(layout.trackOffsets[trackIdx], 0, z));
-
-    // 両数ごとの停止位置目標を各停車線の枕木上に据え置き型で置く。列車は中央停車なので
-    // N両編成の前端は ±N*車長/2。両方向ぶん、進来方向を向けて設置
-    void AddStopMarkers()
-    {
-        var counts = new List<int>();
-        for (int n = 2; n <= cars; n += 2) counts.Add(n);
-        if (counts.Count == 0 || counts[counts.Count - 1] != cars) counts.Add(cars);
-        var root = new GameObject("StopMarkers");
-        root.transform.SetParent(transform, false);
-        var frame = new RailKit.MeshData();   // 低い基台(金属)
-        var plate = new RailKit.MeshData();   // 暗色プレート
-        var digit = new RailKit.MeshData();   // 数字(立体・不透明・明色)
-        float carL = StationLayout.CarLength;
-        foreach (int trk in layout.stopTracks)
-        {
-            float off = layout.trackOffsets[trk];
-            foreach (int n in counts)
-            {
-                float fz = n * carL * 0.5f;
-                for (int sgn = -1; sgn <= 1; sgn += 2)
-                {
-                    float z = sgn * fz;
-                    // 線路中央(レール間)に低く据え置き。列車は上を通過する。
-                    // プレートは進来方向(-sgn側)へ約45°傾け、俯瞰でも数字が読める向きに(1面)
-                    var driverDir = new Vector3(0, 0.72f, -sgn * 0.69f).normalized;
-                    var rot = Quaternion.LookRotation(driverDir, Vector3.up);
-                    RailKit.AddBox(frame, new Vector3(off, 0.3f, z), new Vector3(0.64f, 0.28f, 0.66f), Quaternion.identity);
-                    var pc = new Vector3(off, 0.62f, z + sgn * 0.16f);
-                    RailKit.AddBox(plate, pc, new Vector3(0.62f, 0.6f, 0.07f), rot);
-                    AddDigits(digit, n, pc + driverDir * 0.06f, rot, 0.38f);
-                }
-            }
-        }
-        RailKit.MeshGO("SPFrame", frame.ToMesh(), MatLib.Get("Switch"), root.transform);
-        RailKit.MeshGO("SPPlate", plate.ToMesh(), MatLib.Get("Tie"), root.transform);
-        RailKit.MeshGO("SPDigit", digit.ToMesh(), MatLib.Get("TrainLight"), root.transform);
-    }
-
-    // 7セグメント風の立体数字。centerを中心、rotで向き、hが桁高さ
-    static readonly int[] SegMask = { 0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F }; // 0-9: gfedcba
-    static void AddDigits(RailKit.MeshData md, int value, Vector3 center, Quaternion rot, float h)
-    {
-        string s = value.ToString();
-        float w = h * 0.58f, t = h * 0.15f, dep = 0.05f;
-        float spacing = w + t * 1.6f;
-        float x0 = -(s.Length - 1) * 0.5f * spacing;
-        for (int i = 0; i < s.Length; i++)
-        {
-            int d = s[i] - '0';
-            if (d < 0 || d > 9) continue;
-            int mask = SegMask[d];
-            float cx = x0 + i * spacing;
-            // a(top) b(TR) c(BR) d(bottom) e(BL) f(TL) g(mid) -> bit 0..6
-            AddSeg(md, mask, 0, center, rot, cx, h * 0.5f, w, t, dep, true);   // a
-            AddSeg(md, mask, 1, center, rot, cx + w * 0.5f, h * 0.25f, h * 0.5f, t, dep, false); // b
-            AddSeg(md, mask, 2, center, rot, cx + w * 0.5f, -h * 0.25f, h * 0.5f, t, dep, false); // c
-            AddSeg(md, mask, 3, center, rot, cx, -h * 0.5f, w, t, dep, true);  // d
-            AddSeg(md, mask, 4, center, rot, cx - w * 0.5f, -h * 0.25f, h * 0.5f, t, dep, false); // e
-            AddSeg(md, mask, 5, center, rot, cx - w * 0.5f, h * 0.25f, h * 0.5f, t, dep, false);  // f
-            AddSeg(md, mask, 6, center, rot, cx, 0, w, t, dep, true);          // g
-        }
-    }
-
-    static void AddSeg(RailKit.MeshData md, int mask, int bit, Vector3 center, Quaternion rot,
-        float lx, float ly, float len, float t, float dep, bool horiz)
-    {
-        if ((mask & (1 << bit)) == 0) return;
-        var size = horiz ? new Vector3(len, t, dep) : new Vector3(t, len, dep);
-        RailKit.AddBox(md, center + rot * new Vector3(-lx, ly, 0), size, rot); // 水平反転して正しい向きに
-    }
 
     // 車止め1基。at=線路端(ローカル)、sign=どちらの端か(内向き=-sign*z)
     static void AddBufferStop(RailKit.MeshData metal, RailKit.MeshData box, Vector3 at, int sign)
