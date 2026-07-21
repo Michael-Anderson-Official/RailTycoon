@@ -66,6 +66,8 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("Canopy", canopy.ToMesh(), MatLib.Get("Canopy"), transform);
         RailKit.MeshGO("House", house.ToMesh(), MatLib.Get("StationHouse"), transform);
 
+        AddStopMarkers();
+
         var col = gameObject.GetComponent<BoxCollider>();
         if (col == null) col = gameObject.AddComponent<BoxCollider>();
         col.center = new Vector3(0, 5, 0);
@@ -175,6 +177,56 @@ public class Station : MonoBehaviour
 
     public Vector3 TrackWorldPoint(int trackIdx, float z)
         => transform.TransformPoint(new Vector3(layout.trackOffsets[trackIdx], 0, z));
+
+    // 両数ごとの停止位置目標(停止線+数字)を各停車線に置く。列車は中央停車なので
+    // N両編成の前端は ±N*車長/2。両方向ぶん置く
+    void AddStopMarkers()
+    {
+        var counts = new List<int>();
+        for (int n = 2; n <= cars; n += 2) counts.Add(n);
+        if (counts.Count == 0 || counts[counts.Count - 1] != cars) counts.Add(cars);
+        var root = new GameObject("StopMarkers");
+        root.transform.SetParent(transform, false);
+        var bar = new RailKit.MeshData();
+        float carL = StationLayout.CarLength;
+        foreach (int trk in layout.stopTracks)
+        {
+            float off = layout.trackOffsets[trk];
+            // この線に隣接する最寄りホームの、線路側の縁(数字を置く)
+            float edge = off;
+            if (layout.platforms.Count > 0)
+            {
+                var pl = layout.platforms[0]; float bd = 1e9f;
+                foreach (var p in layout.platforms) { float d = Mathf.Abs(p.x - off); if (d < bd) { bd = d; pl = p; } }
+                edge = pl.x + Mathf.Sign(off - pl.x) * (pl.y * 0.5f - 0.7f);
+            }
+            foreach (int n in counts)
+            {
+                float fz = n * carL * 0.5f;
+                for (int sgn = -1; sgn <= 1; sgn += 2)
+                {
+                    float z = sgn * fz;
+                    // 停止線(軌間をまたぐ黄色い細バー、線路上)
+                    RailKit.AddBox(bar, new Vector3(off, 0.5f, z), new Vector3(1.7f, 0.06f, 0.4f), Quaternion.identity);
+                    // 両数の数字はホーム上に平置き(車体を透けないようホーム側へ)
+                    var go = new GameObject("SP" + n);
+                    go.transform.SetParent(root.transform, false);
+                    go.transform.localPosition = new Vector3(edge, 1.14f, z);
+                    go.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+                    var tm = go.AddComponent<TextMesh>();
+                    tm.text = n.ToString();
+                    tm.font = MatLib.JpFont;
+                    tm.fontSize = 48;
+                    tm.characterSize = 0.5f;
+                    tm.anchor = TextAnchor.MiddleCenter;
+                    tm.alignment = TextAlignment.Center;
+                    tm.color = new Color(0.95f, 0.75f, 0.05f);
+                    go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
+                }
+            }
+        }
+        RailKit.MeshGO("SPBar", bar.ToMesh(), MatLib.Get("SwitchBox"), root.transform);
+    }
 
     // 車止め1基。at=線路端(ローカル)、sign=どちらの端か(内向き=-sign*z)
     static void AddBufferStop(RailKit.MeshData metal, RailKit.MeshData box, Vector3 at, int sign)
