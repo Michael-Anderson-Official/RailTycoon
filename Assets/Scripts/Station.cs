@@ -305,14 +305,17 @@ public class Station : MonoBehaviour
         int n = (int)spawnAcc;
         if (n <= 0) return;
         spawnAcc -= n;
+        // reach(HashSet)は列挙順が保証されないため、TrackNetwork.stationsの登録順で
+        // フィルタして安定させる(同一seed・同一手順で同じ行き先分布になるようにするため)
         float totalW = 0;
-        foreach (var s in reach) totalW += 1 + s.dev;
+        foreach (var s in TrackNetwork.stations) if (reach.Contains(s)) totalW += 1 + s.dev;
         for (int k = 0; k < n; k++)
         {
-            float r = Random.value * totalW;
+            float r = GameRandom.NextFloat01() * totalW;
             Station dest = null;
-            foreach (var s in reach)
+            foreach (var s in TrackNetwork.stations)
             {
+                if (!reach.Contains(s)) continue;
                 r -= 1 + s.dev;
                 dest = s;
                 if (r <= 0) break;

@@ -270,6 +270,7 @@ public static class SaveLoad
         GameState.carried = 0;
         GameState.gameMinutes = 6 * 60;
         GameState.timeScale = 5f;
+        GameState.paused = false;
         UnityEngine.SceneManagement.SceneManager.LoadScene(0);
     }
 }

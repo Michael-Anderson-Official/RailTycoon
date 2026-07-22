@@ -75,6 +75,10 @@ public static class TrackNetwork
 {
     public static readonly List<Station> stations = new List<Station>();
     public static readonly List<TrackSegment> segments = new List<TrackSegment>();
+    // 列車の安定した中央リスト(登録順)。Train.OnEnable/OnDisableで自己登録・解除する。
+    // Bootstrap.SimTickがここを固定順で回すことで、Unity既定のUpdate呼び出し順に
+    // 依存しない決定的なtick処理を実現する
+    public static readonly List<Train> trains = new List<Train>();
     public static int nameCounter;
 
     static readonly Dictionary<Station, HashSet<Station>> reachCache = new Dictionary<Station, HashSet<Station>>();
@@ -83,6 +87,7 @@ public static class TrackNetwork
     {
         stations.Clear();
         segments.Clear();
+        trains.Clear();
         reachCache.Clear();
         nameCounter = 0;
     }

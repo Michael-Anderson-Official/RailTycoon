@@ -66,9 +66,15 @@ public class Train : MonoBehaviour
         dwellT = 8f;
     }
 
-    void Update()
+    void OnEnable() => TrackNetwork.trains.Add(this);
+    void OnDisable() => TrackNetwork.trains.Remove(this);
+
+    // Bootstrap.SimTickから固定tickごとに呼ばれるシミュレーション本体。
+    // dtは「シミュレーション秒」(tickSeconds * GameState.timeScale)。
+    // 見た目の反映(PlaceCars)はここでは行わず、Bootstrap側が全列車のtick消化後に
+    // 1回だけまとめて呼ぶ(複数tickを1フレームで消化する場合の無駄な再描画を避けるため)
+    public void SimTick(float dt)
     {
-        float dt = Time.deltaTime * GameState.timeScale;
         if (state == St.Dwell)
         {
             dwellT -= dt;
@@ -96,7 +102,6 @@ public class Train : MonoBehaviour
                 s = total;
                 Arrive();
             }
-            PlaceCars();
         }
     }
 
@@ -189,9 +194,11 @@ public class Train : MonoBehaviour
         int avail = fm.Capacity - onboardCount;
         if (avail <= 0) return 0;
         int total = 0;
-        var keys = new List<Station>(st.waiting.Keys);
-        foreach (var dest in keys)
+        // Dictionary.Keysの列挙順は保証されないため、TrackNetwork.stationsの登録順で
+        // フィルタして安定させる(同一seed・同一手順で同じ乗車内訳になるようにするため)
+        foreach (var dest in TrackNetwork.stations)
         {
+            if (!st.waiting.ContainsKey(dest)) continue;
             if (avail <= 0) break;
             if (!route.Contains(dest) || dest == st) continue;
             int take = Mathf.Min(st.waiting[dest], avail);
@@ -266,7 +273,7 @@ public class Train : MonoBehaviour
         routeTracks[i] = track;
     }
 
-    void PlaceCars() => PlaceCarsStatic(carTs, path, cum, s);
+    public void PlaceCars() => PlaceCarsStatic(carTs, path, cum, s);
 
     public float SpeedKmh => v * 3.6f;
 

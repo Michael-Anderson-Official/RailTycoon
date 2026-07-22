@@ -4,8 +4,22 @@ using UnityEngine.EventSystems;
 // シーンにはこれ1つだけ置く。地面・光源・カメラ・UI・コントローラを実行時に組み立てる
 public class Bootstrap : MonoBehaviour
 {
+    // 固定tick間隔。Awakeで Application.targetFrameRate=60 を指定しており、
+    // 既存の列車速度・加減速・乗客生成レートはこの前提で調整されてきたため、
+    // それに最も近い刻みを採用し既存バランスへの影響を最小化する
+    public const float TickSeconds = 1f / 60f;
+    // 1フレームで消化する最大tick数。60Hz基準で約133ms分の遅延まで同一フレームで
+    // 消化する。これを超える遅延(フレーム落ち)ではシミュレーション時間の一部を
+    // 切り捨てるため、その場合に限り「同じ総経過時間でも結果が一致する」保証の
+    // 対象外となる(デススパイラル防止を優先)
+    public const int MaxTicksPerFrame = 8;
+
+    readonly FixedStepAccumulator accumulator = new FixedStepAccumulator(TickSeconds, MaxTicksPerFrame);
+
     void Awake()
     {
+        // 実プレイでは毎回変わる種を採用(テストはGameRandom.Seed()で明示的に固定して使う)
+        GameRandom.Seed(unchecked((uint)System.DateTime.Now.Ticks));
         Application.targetFrameRate = 60;
         QualitySettings.shadowDistance = 700f;
         BuildEnvironment();
@@ -101,9 +115,7 @@ public class Bootstrap : MonoBehaviour
 
     void Update()
     {
-        float dtSec = Time.deltaTime * GameState.timeScale;      // 列車と同じ実時間基準(×1で実速度)
-        GameState.gameMinutes += dtSec / 60f;                    // 時計も実時間(×1=1秒で1秒進む)
-        foreach (var st in TrackNetwork.stations) st.Tick(dtSec);
+        RunFrame(Time.unscaledDeltaTime);
 
         saveTimer += Time.unscaledDeltaTime;
         if (saveTimer >= 15f)
@@ -111,6 +123,30 @@ public class Bootstrap : MonoBehaviour
             saveTimer = 0;
             if (TrackNetwork.stations.Count > 0) SaveLoad.Save();
         }
+    }
+
+    // 1フレーム分の進行。一時停止中はaccumulatorに実時間を積まない(解除時にまとめて
+    // 進む/暴走するのを防ぐ)ため0を返す。Time.timeScale(Unity組込み)ではなく
+    // unscaledDeltaSecondsを直接受け取ることで、ゲーム独自のGameState.timeScaleと
+    // 完全に独立させ、かつテストから任意のdelta値を与えて検証できるようにする。
+    // 戻り値は今回消化したtick数
+    public int RunFrame(float unscaledDeltaSeconds)
+    {
+        if (GameState.paused) return 0;
+        int ticks = accumulator.Advance(unscaledDeltaSeconds);
+        for (int i = 0; i < ticks; i++) SimTick(TickSeconds);
+        if (ticks > 0) foreach (var t in TrackNetwork.trains) t.PlaceCars();
+        return ticks;
+    }
+
+    // 固定tick1回分のシミュレーション本体。処理順序は固定: 時計→駅(乗客生成)→列車(移動・到着・乗降)。
+    // Bootstrap.Updateのaccumulatorから、または将来のテストから直接呼べる
+    public void SimTick(float tickSeconds)
+    {
+        float simDt = tickSeconds * GameState.timeScale; // 列車と同じシミュレーション秒基準(×1で実速度)
+        GameState.gameMinutes += simDt / 60f;             // 時計も同じ基準(×1=1秒で1秒進む)
+        foreach (var st in TrackNetwork.stations) st.Tick(simDt);
+        foreach (var t in TrackNetwork.trains) t.SimTick(simDt);
     }
 
     void LateUpdate() => CityGrid.FlushIfDirty();

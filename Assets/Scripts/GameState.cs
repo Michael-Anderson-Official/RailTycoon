@@ -12,6 +12,7 @@ public static class GameState
     public static long carried;              // 累計輸送人員
     public static float gameMinutes = 6 * 60; // 1日目 06:00 開始
     public static float timeScale = 5f;
+    public static bool paused;               // 一時停止中はBootstrapのaccumulatorに実時間を積まない
 
     public static bool Spend(double yen)
     {
