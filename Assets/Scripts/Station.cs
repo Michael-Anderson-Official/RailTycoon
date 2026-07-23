@@ -47,9 +47,29 @@ public class Station : MonoBehaviour
     // 子メッシュを(再)生成する。パラメータ変更後に呼び直せる
     public void Build()
     {
+        // M2-D: 面・線構成が変わらない改築(両数のみ変更等)なら、ホーム縁のモード
+        // (乗降可/乗車専用/降車専用/使用停止)を新しいlayoutへ引き継ぐ。
+        // StationLayout.Compute(faces,lines)は純粋関数なので、faces/linesが
+        // 同じなら新旧のedges列は必ず同じ順序・同じ内容(モードを除く)になる
+        bool hadLayout = layout.platforms != null && layout.trackOffsets != null;
+        int oldFaces = hadLayout ? layout.platforms.Count : -1;
+        int oldLines = hadLayout ? layout.trackOffsets.Length : -1;
+        var oldEdges = hadLayout ? layout.edges : null;
+
         for (int i = transform.childCount - 1; i >= 0; i--)
             DestroyImmediateSafe(transform.GetChild(i).gameObject);
         layout = StationLayout.Compute(faces, lines);
+
+        if (oldEdges != null && oldFaces == faces && oldLines == lines && oldEdges.Count == layout.edges.Count)
+        {
+            for (int i = 0; i < layout.edges.Count; i++)
+            {
+                var e = layout.edges[i];
+                e.mode = oldEdges[i].mode;
+                layout.edges[i] = e;
+            }
+        }
+
         occupied = new bool[layout.trackOffsets.Length];
 
         float H = HalfLen, T = StationLayout.ThroatLen;
@@ -218,6 +238,50 @@ public class Station : MonoBehaviour
     // 停車可能な番線(左→右の物理順)。UIの「N番線」はこの並び順で1始まり
     public IReadOnlyList<int> StopTracks => layout.stopTracks;
     public int PlatformCount => layout.stopTracks.Count;
+
+    // M2-D: ホーム縁(1本の物理線の片側)一覧。1線に最大2件(例: 3面2線の各線は
+    // 両側にホーム縁を持つ)。番線番号・予約・閉塞・停止位置は引き続きtrack index
+    // (StopTracks/PlatformCount等)を参照し、ホーム縁は乗降可否の判定にのみ使う
+    public IReadOnlyList<StationLayout.PlatformEdge> PlatformEdges => layout.edges;
+
+    public bool SetPlatformEdgeMode(int trackIndex, int side, StationLayout.PlatformEdgeMode mode)
+    {
+        for (int i = 0; i < layout.edges.Count; i++)
+        {
+            var e = layout.edges[i];
+            if (e.trackIndex != trackIndex || e.side != side) continue;
+            e.mode = mode;
+            layout.edges[i] = e;
+            return true;
+        }
+        return false;
+    }
+
+    // trackIndexに対応する全ホーム縁のうち、1つでも乗車(または降車)を許せば真。
+    // 複数のホーム縁を個別に処理するのではなく、この1回の判定だけで乗降処理全体の
+    // 実行有無を決める(同じ旅客・運賃・輸送実績を二重に計上しないため)
+    public bool CanBoardAt(int trackIndex)
+    {
+        foreach (var e in layout.edges)
+        {
+            if (e.trackIndex != trackIndex) continue;
+            if (StationLayout.AllowsBoard(e.mode)) return true;
+        }
+        // 実装後レビューでCodex CLIが指摘: この線にホーム縁が1つも無ければ乗降不可とする。
+        // 実際のゲームプレイでcurTrackは常にStopTracks(=必ず1つ以上ホーム縁を持つ)の
+        // 一部であるため通常は到達しないが、不正なtrackIndexを誤って許可しないための防御
+        return false;
+    }
+
+    public bool CanAlightAt(int trackIndex)
+    {
+        foreach (var e in layout.edges)
+        {
+            if (e.trackIndex != trackIndex) continue;
+            if (StationLayout.AllowsAlight(e.mode)) return true;
+        }
+        return false;
+    }
     public int PlatformNumberOf(int trackIdx)
     {
         int n = layout.stopTracks.IndexOf(trackIdx);

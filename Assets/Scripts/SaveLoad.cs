@@ -153,10 +153,56 @@ public static class SaveLoad
         public LnDataV2[] ln;
     }
 
+    // ==================== v3 (M2-D: ホーム縁の乗降モード) ====================
+    // 駅構内の物理線路・ホーム本体数自体(cars/faces/lines)はv2のままStDataV3が
+    // 継承し、新たにホーム縁(1本の物理線の片側、最大2件/線)の乗降モードだけを
+    // 追加する。station以外(segment/line/train)はv2のスキーマから変更が無いため、
+    // SegDataV2/LnDataV2/TrDataV2/OnboardGroupV2をそのまま再利用する
+
+    [Serializable]
+    public class PlatformEdgeOverrideData
+    {
+        public int trackIndex;
+        public int side;   // -1または+1のみ有効
+        public int mode;   // StationLayout.PlatformEdgeModeの値(0-3)
+    }
+
+    [Serializable]
+    public class StDataV3
+    {
+        public int id;              // 0=不正値(未割当)
+        public float x, z, yaw;
+        public int cars, faces, lines;
+        public string name;
+        public float dev;
+        public double spawnAcc;
+        public int[] waitToId;      // 目的地駅のstable id
+        public int[] waitN;
+        // Normal(既定)以外のホーム縁のみを列挙する(null/空なら全てNormal)。
+        // v1/v2からのmigrationでは常にnull(=全てNormal、既存挙動を維持)にする
+        public PlatformEdgeOverrideData[] edgeOverrides;
+    }
+
+    [Serializable]
+    public class GameDataV3
+    {
+        public int v = 3;
+        public double money;
+        public long carried;
+        public float minutes, speed;
+        public uint randomState;
+        public int nameCounter;
+        public int stationIdCounter, segmentIdCounter, trainIdCounter, lineIdCounter;
+        public StDataV3[] st;
+        public SegDataV2[] seg;
+        public TrDataV2[] tr;
+        public LnDataV2[] ln;
+    }
+
     public static void Save()
     {
         if (suppress) return;
-        var d = new GameDataV2
+        var d = new GameDataV3
         {
             money = GameState.money,
             carried = GameState.carried,
@@ -170,11 +216,11 @@ public static class SaveLoad
             lineIdCounter = Services.idCounter,
         };
 
-        var stList = new List<StDataV2>();
+        var stList = new List<StDataV3>();
         foreach (var s in TrackNetwork.stations)
         {
             if (s.id == 0) continue; // preview等、未割当IDの駅は保存しない
-            var sd = new StDataV2
+            var sd = new StDataV3
             {
                 id = s.id,
                 x = s.transform.position.x,
@@ -191,6 +237,12 @@ public static class SaveLoad
                 if (kv.Key != null && kv.Key.id != 0) { to.Add(kv.Key.id); n.Add(kv.Value); }
             sd.waitToId = to.ToArray();
             sd.waitN = n.ToArray();
+            // Normal(既定)以外のホーム縁のみ保存する(省略分はロード時に既定Normalとなる)
+            var overrides = new List<PlatformEdgeOverrideData>();
+            foreach (var e in s.PlatformEdges)
+                if (e.mode != StationLayout.PlatformEdgeMode.Normal)
+                    overrides.Add(new PlatformEdgeOverrideData { trackIndex = e.trackIndex, side = e.side, mode = (int)e.mode });
+            sd.edgeOverrides = overrides.ToArray();
             stList.Add(sd);
         }
         d.st = stList.ToArray();
@@ -332,7 +384,7 @@ public static class SaveLoad
         catch (Exception e) { Debug.LogError("SaveLoad: version probe failed: " + e.Message); return false; }
         if (probe == null) return false;
 
-        GameDataV2 v2;
+        GameDataV3 v3;
         bool migrated;
         if (probe.v == 1)
         {
@@ -340,13 +392,22 @@ public static class SaveLoad
             try { v1 = JsonUtility.FromJson<GameData>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v1 parse failed: " + e.Message); return false; }
             if (v1 == null || v1.st == null || v1.st.Count == 0) return false;
-            v2 = MigrateV1ToV2(v1);
+            v3 = MigrateV2ToV3(MigrateV1ToV2(v1));
             migrated = true;
         }
         else if (probe.v == 2)
         {
+            GameDataV2 v2;
             try { v2 = JsonUtility.FromJson<GameDataV2>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v2 parse failed: " + e.Message); return false; }
+            if (v2 == null || v2.st == null || v2.st.Length == 0) return false;
+            v3 = MigrateV2ToV3(v2);
+            migrated = true;
+        }
+        else if (probe.v == 3)
+        {
+            try { v3 = JsonUtility.FromJson<GameDataV3>(json); }
+            catch (Exception e) { Debug.LogError("SaveLoad: v3 parse failed: " + e.Message); return false; }
             migrated = false;
         }
         else
@@ -354,22 +415,54 @@ public static class SaveLoad
             Debug.LogError("SaveLoad: unsupported version " + probe.v + " (0=欠落, 未来versionは非対応)");
             return false;
         }
-        if (v2 == null || v2.st == null || v2.st.Length == 0) return false;
+        if (v3 == null || v3.st == null || v3.st.Length == 0) return false;
 
         string error;
-        if (!Validate(v2, out error))
+        if (!Validate(v3, out error))
         {
             Debug.LogError("SaveLoad: validation failed: " + error);
             return false;
         }
 
-        if (!ApplyToWorld(v2, out error))
+        if (!ApplyToWorld(v3, out error))
         {
             Debug.LogError("SaveLoad: apply failed: " + error);
             return false;
         }
-        if (migrated) Debug.Log("SaveLoad: v1セーブをv2へ正規化して読み込みました(次回保存時にv2として書き戻ります)");
+        if (migrated) Debug.Log("SaveLoad: 旧セーブをv3へ正規化して読み込みました(次回保存時にv3として書き戻ります)");
         return true;
+    }
+
+    // v2(ホーム縁の乗降モードが存在しない)をv3形式へ正規化する。全てのホーム縁は
+    // 既定Normalとする(不可逆ではあるが、既定Normal=既存挙動そのままなので
+    // 「v2保存直前のcontinued world」と一致しないのはstate/s/v等、既にM2-Cで
+    // 不可逆と整理済みの項目に限られる。ホーム縁自体はv2に概念が無いだけで
+    // 挙動上の相違は生まない)
+    static GameDataV3 MigrateV2ToV3(GameDataV2 v2)
+    {
+        var d = new GameDataV3
+        {
+            money = v2.money, carried = v2.carried, minutes = v2.minutes, speed = v2.speed,
+            randomState = v2.randomState, nameCounter = v2.nameCounter,
+            stationIdCounter = v2.stationIdCounter, segmentIdCounter = v2.segmentIdCounter,
+            trainIdCounter = v2.trainIdCounter, lineIdCounter = v2.lineIdCounter,
+            seg = v2.seg, tr = v2.tr, ln = v2.ln,
+        };
+        var stList = new StDataV3[v2.st.Length];
+        for (int i = 0; i < v2.st.Length; i++)
+        {
+            var sd = v2.st[i];
+            stList[i] = new StDataV3
+            {
+                id = sd.id, x = sd.x, z = sd.z, yaw = sd.yaw,
+                cars = sd.cars, faces = sd.faces, lines = sd.lines,
+                name = sd.name, dev = sd.dev, spawnAcc = sd.spawnAcc,
+                waitToId = sd.waitToId, waitN = sd.waitN,
+                edgeOverrides = null, // 全てNormal
+            };
+        }
+        d.st = stList;
+        return d;
     }
 
     // v1(index参照・state/s/v/onboard/spawnAcc等が存在しない)をv2形式へ正規化する。
@@ -534,12 +627,12 @@ public static class SaveLoad
 
     // 参照整合性・値域・重複ID・重複予約claimを、GameObjectを一切生成せずに検証する。
     // ここを通過すれば ApplyToWorld は原則として失敗しない
-    static bool Validate(GameDataV2 d, out string error)
+    static bool Validate(GameDataV3 d, out string error)
     {
         error = null;
         // JsonUtilityはJSONに存在しない配列フィールドをnullのまま残す(空配列にはならない)。
         // 以降ApplyToWorldでも同じdを使い回すため、ここで一度だけ正規化しておく
-        if (d.st == null) d.st = new StDataV2[0];
+        if (d.st == null) d.st = new StDataV3[0];
         if (d.seg == null) d.seg = new SegDataV2[0];
         if (d.ln == null) d.ln = new LnDataV2[0];
         if (d.tr == null) d.tr = new TrDataV2[0];
@@ -566,9 +659,9 @@ public static class SaveLoad
             // (実装後レビューでCodex CLIが指摘)
             if (sd.cars < 2 || sd.cars > 10 || sd.faces < 1 || sd.faces > 4 || sd.lines < 1 || sd.lines > 8)
             { error = "station構成が範囲外: " + sd.id; return false; }
-            // UIはlines>=facesを常に強制する(UIController.ChangeFaces/ChangeLines)。
-            // この従属制約もValidateすべき(実装後レビューでCodex CLIが指摘)
-            if (sd.lines < sd.faces) { error = "station構成が不正(lines<faces): " + sd.id; return false; }
+            // M2-D: 面数より線数が1つ少なくても各面が物理線に接続できる
+            // (例: 3面2線、外側|1番線|島式|2番線|外側)。最低構成はMax(1,faces-1)
+            if (sd.lines < Mathf.Max(1, sd.faces - 1)) { error = "station構成が不正(lines不足): " + sd.id; return false; }
             if (float.IsNaN(sd.x) || float.IsInfinity(sd.x) || float.IsNaN(sd.z) || float.IsInfinity(sd.z)
                 || float.IsNaN(sd.yaw) || float.IsInfinity(sd.yaw)) { error = "station座標が不正: " + sd.id; return false; }
             // devは行き先抽選の重み・spawnAcc更新レートに使われるため、NaN/Infinityが
@@ -584,8 +677,27 @@ public static class SaveLoad
                 foreach (var n in sd.waitN) { if (n < 0) { error = "waiting人数が負: " + sd.id; return false; } total += n; }
             }
             if (total > cap) { error = "WaitingCap超過: station " + sd.id; return false; }
-            layoutById[sd.id] = StationLayout.Compute(sd.faces, sd.lines);
+            var stLayout = StationLayout.Compute(sd.faces, sd.lines);
+            layoutById[sd.id] = stLayout;
             if (sd.id > maxStationId) maxStationId = sd.id;
+
+            // M2-D: ホーム縁の上書き設定を検証する。重複キー・不正side・不正mode・
+            // 実在しない(trackIndex,side)の組を全て拒否する
+            if (sd.edgeOverrides != null)
+            {
+                var seenKeys = new HashSet<long>();
+                foreach (var ov in sd.edgeOverrides)
+                {
+                    if (ov.side != -1 && ov.side != 1) { error = "edgeOverrideのsideが不正: station " + sd.id; return false; }
+                    if (ov.mode < 0 || ov.mode > 3) { error = "edgeOverrideのmodeが不正: station " + sd.id; return false; }
+                    long key = ((long)ov.trackIndex << 32) | (uint)(ov.side + 1);
+                    if (!seenKeys.Add(key)) { error = "edgeOverrideが重複: station " + sd.id + " track " + ov.trackIndex; return false; }
+                    bool exists = false;
+                    foreach (var e in stLayout.edges)
+                        if (e.trackIndex == ov.trackIndex && e.side == ov.side) { exists = true; break; }
+                    if (!exists) { error = "edgeOverrideが実在しないホーム縁を参照: station " + sd.id + " track " + ov.trackIndex + " side " + ov.side; return false; }
+                }
+            }
         }
         if (d.stationIdCounter < maxStationId) { error = "stationIdCounterが既存最大IDより小さい"; return false; }
 
@@ -775,7 +887,7 @@ public static class SaveLoad
     // 途中で例外が起きた場合はstaging rootだけを破棄し、既存ワールド・GameState・
     // TrackNetwork/Servicesは一切変更されない(実装後レビューでCodex CLIが指摘した
     // 「ロードがトランザクショナルでない」Critical指摘への対応)
-    static bool ApplyToWorld(GameDataV2 d, out string error)
+    static bool ApplyToWorld(GameDataV3 d, out string error)
     {
         error = null;
         var stagingRoot = new GameObject("LoadStaging");
@@ -784,7 +896,7 @@ public static class SaveLoad
         {
             // 駅はstable ID昇順で生成する(旅客の行き先抽選・乗車順の決定性のため。
             // Station.Tick/Train.BoardはいずれもTrackNetwork.stationsの登録順に依存する)
-            var sortedSt = new List<StDataV2>(d.st);
+            var sortedSt = new List<StDataV3>(d.st);
             sortedSt.Sort((x, y) => x.id.CompareTo(y.id));
             var stagedStations = new List<Station>();
             var stById = new Dictionary<int, Station>();
@@ -802,6 +914,11 @@ public static class SaveLoad
                 s.dev = sd.dev;
                 s.Build();
                 s.RestoreSpawnAccumulator(sd.spawnAcc);
+                // M2-D: ホーム縁の上書き設定を反映する(Validateで実在性を確認済みのため
+                // 失敗しない前提)。省略された縁は既定Normalのまま
+                if (sd.edgeOverrides != null)
+                    foreach (var ov in sd.edgeOverrides)
+                        s.SetPlatformEdgeMode(ov.trackIndex, ov.side, (StationLayout.PlatformEdgeMode)ov.mode);
                 stagedStations.Add(s);
                 stById[sd.id] = s;
             }

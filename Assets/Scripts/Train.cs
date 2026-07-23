@@ -300,16 +300,21 @@ public class Train : MonoBehaviour
             curSeg = null;
         }
         var st = route[idx];
-        // 降車と運賃収受
+        // 降車と運賃収受。M2-D: この線に降車可能なホーム縁が1つも無ければ、
+        // ループごと丸ごとスキップする(ホーム縁ごとに繰り返さないため、同じ旅客・
+        // 運賃を二重に計上することは無い)。降車不可の旅客は乗車したまま残る
         int off = 0;
-        for (int i = onboard.Count - 1; i >= 0; i--)
+        if (st.CanAlightAt(curTrack))
         {
-            if (onboard[i].dest != st) continue;
-            float km = Vector3.Distance(onboard[i].boardPos, st.transform.position) / 1000f;
-            GameState.EarnFare(onboard[i].count, km);
-            off += onboard[i].count;
-            onboardCount -= onboard[i].count;
-            onboard.RemoveAt(i);
+            for (int i = onboard.Count - 1; i >= 0; i--)
+            {
+                if (onboard[i].dest != st) continue;
+                float km = Vector3.Distance(onboard[i].boardPos, st.transform.position) / 1000f;
+                GameState.EarnFare(onboard[i].count, km);
+                off += onboard[i].count;
+                onboardCount -= onboard[i].count;
+                onboard.RemoveAt(i);
+            }
         }
         st.UpdateLabel();
         state = St.Dwell;
@@ -320,6 +325,8 @@ public class Train : MonoBehaviour
 
     int Board(Station st)
     {
+        // M2-D: この線に乗車可能なホーム縁が1つも無ければ乗車処理自体を行わない
+        if (!st.CanBoardAt(curTrack)) return 0;
         int avail = fm.Capacity - onboardCount;
         if (avail <= 0) return 0;
         int total = 0;

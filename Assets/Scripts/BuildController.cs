@@ -15,6 +15,28 @@ public class BuildController : MonoBehaviour
     public Station previewStation;
     public Station rebuildTarget;   // 建て替え対象(非nullなら駅モードは建て替え動作)
 
+    // M2-D: 面・線プリセット。「今回、完全自由配置エディターまで作る必要はない。
+    // 汎用データモデル+プリセット方式でよい」との方針により、+/-ステッパーではなく
+    // 代表的な構成をボタンで選ぶUIにする(内部データはcars/faces/linesのまま)
+    public struct StationPreset { public string label; public int faces, lines; }
+    public static readonly StationPreset[] StationPresets =
+    {
+        new StationPreset { label = "1面1線", faces = 1, lines = 1 },
+        new StationPreset { label = "1面2線(島式)", faces = 1, lines = 2 },
+        new StationPreset { label = "2面2線(相対式)", faces = 2, lines = 2 },
+        new StationPreset { label = "2面3線", faces = 2, lines = 3 },
+        new StationPreset { label = "2面4線", faces = 2, lines = 4 },
+        new StationPreset { label = "3面2線", faces = 3, lines = 2 },
+    };
+
+    public void ApplyStationPreset(int presetIndex)
+    {
+        if (presetIndex < 0 || presetIndex >= StationPresets.Length) return;
+        pFaces = StationPresets[presetIndex].faces;
+        pLines = StationPresets[presetIndex].lines;
+        ApplyPreviewParams();
+    }
+
     Station trackFirst;
     GameObject trackMarker;
 

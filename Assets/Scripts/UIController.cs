@@ -18,7 +18,8 @@ public class UIController : MonoBehaviour
     Text carsVal, facesVal, linesVal, stationTitle, confirmBtnLabel;
     Station infoStation;
     float removeArmedUntil;
-    GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow, renameModal;
+    GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow, renameModal, edgePanel;
+    RectTransform edgeRows;
     InputField renameInput;
     // 列車パネル(タブ制): 系統をつくる / 列車を配置
     GameObject serviceTab, dispatchView, lineListView, createView;
@@ -55,6 +56,7 @@ public class UIController : MonoBehaviour
         BuildTrainPanel();
         BuildInfoPanel();
         BuildRenameModal();
+        BuildEdgeModal();
         BuildToast();
         OnModeChanged();
     }
@@ -190,11 +192,30 @@ public class UIController : MonoBehaviour
         var rt = p.rectTransform;
         rt.pivot = new Vector2(0, 0.5f);
         rt.anchoredPosition = new Vector2(8, 40);
-        rt.sizeDelta = new Vector2(330, 620);
+        rt.sizeDelta = new Vector2(330, 740);
         stationPanel = p.gameObject;
         float y = -14;
         stationTitle = Label("Title", p.transform, "駅を建設", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 44), new Vector2(-14, y), TextAnchor.MiddleLeft);
         y -= 56;
+        // M2-D: 面・線プリセット(3列×2行のボタン)。タップで一括してpFaces/pLinesを設定する
+        Label("PresetLabel", p.transform, "プリセット", 20, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 28), new Vector2(-14, y), TextAnchor.MiddleLeft);
+        y -= 30;
+        int cols = 3;
+        float cellW = (330f - 28f) / cols;
+        float cellH = 48f;
+        for (int i = 0; i < BuildController.StationPresets.Length; i++)
+        {
+            int idx = i; // クロージャ用にローカルへ複写
+            int col = i % cols, row = i / cols;
+            float x0 = 14 + col * cellW;
+            float rowY = y - row * (cellH + 4);
+            Btn("Preset" + i, p.transform, BuildController.StationPresets[i].label, 17,
+                new Vector2(0, 1), new Vector2(0, 1),
+                new Vector2(x0, rowY - cellH), new Vector2(x0 + cellW - 4, rowY),
+                () => BC.ApplyStationPreset(idx));
+        }
+        int presetRows = (BuildController.StationPresets.Length + cols - 1) / cols;
+        y -= presetRows * (cellH + 4) + 10;
         carsVal = ParamRow(p.transform, "対応両数", ref y, () => ChangeCars(-1), () => ChangeCars(1));
         facesVal = ParamRow(p.transform, "ホーム(面)", ref y, () => ChangeFaces(-1), () => ChangeFaces(1));
         linesVal = ParamRow(p.transform, "番線(線)", ref y, () => ChangeLines(-1), () => ChangeLines(1));
@@ -222,10 +243,12 @@ public class UIController : MonoBehaviour
     void ChangeFaces(int d)
     {
         BC.pFaces = Mathf.Clamp(BC.pFaces + d, 1, 4);
-        BC.pLines = Mathf.Clamp(BC.pLines, BC.pFaces, 8);
+        // M2-D: 面数より線数が1つ少なくても各面が物理線に接続できる
+        // (例: 3面2線)。最低構成はMax(1,faces-1)まで許容する
+        BC.pLines = Mathf.Clamp(BC.pLines, Mathf.Max(1, BC.pFaces - 1), 8);
         BC.ApplyPreviewParams();
     }
-    void ChangeLines(int d) { BC.pLines = Mathf.Clamp(BC.pLines + d, Mathf.Max(1, BC.pFaces), 8); BC.ApplyPreviewParams(); }
+    void ChangeLines(int d) { BC.pLines = Mathf.Clamp(BC.pLines + d, Mathf.Max(1, BC.pFaces - 1), 8); BC.ApplyPreviewParams(); }
     void RotatePreview() { BC.pYaw = Mathf.Repeat(BC.pYaw + 45f, 360f); BC.ApplyPreviewParams(); }
 
     void BuildTrainPanel()
@@ -453,9 +476,11 @@ public class UIController : MonoBehaviour
         var rt = p.rectTransform;
         rt.pivot = new Vector2(0.5f, 1);
         rt.anchoredPosition = new Vector2(0, -120);
-        rt.sizeDelta = new Vector2(480, 380);
+        rt.sizeDelta = new Vector2(480, 440);
         infoPanel = p.gameObject;
-        infoText = Label("Info", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(16, 184), new Vector2(-16, -12), TextAnchor.UpperLeft);
+        infoText = Label("Info", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(16, 244), new Vector2(-16, -12), TextAnchor.UpperLeft);
+        // M2-D: ホーム縁(番線ごとの乗降モード)の設定画面を開く
+        Btn("PlatformEdges", p.transform, "番線ごとの乗降設定", 24, new Vector2(0.04f, 0), new Vector2(0.96f, 0), new Vector2(0, 184), new Vector2(0, 232), OnPlatformEdgesTap, new Color(0.3f, 0.5f, 0.36f, 0.95f));
         Btn("Rename", p.transform, "名前を変更", 26, new Vector2(0.04f, 0), new Vector2(0.96f, 0), new Vector2(0, 126), new Vector2(0, 174), OnRenameTap, new Color(0.24f, 0.42f, 0.5f, 0.95f));
         Btn("Rebuild", p.transform, "建て替え", 26, new Vector2(0.04f, 0), new Vector2(0.49f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRebuildTap, BtnActive);
         Btn("Remove", p.transform, "撤去", 26, new Vector2(0.51f, 0), new Vector2(0.96f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRemoveTap, new Color(0.55f, 0.22f, 0.24f, 0.95f));
@@ -520,6 +545,81 @@ public class UIController : MonoBehaviour
         Btn("OK", box.transform, "決定", 28, new Vector2(0, 0), new Vector2(0.48f, 0), new Vector2(24, 24), new Vector2(0, 88), OnRenameOk, BtnActive);
         Btn("Cancel", box.transform, "キャンセル", 26, new Vector2(0.52f, 0), new Vector2(1, 0), new Vector2(0, 24), new Vector2(-24, 88), () => renameModal.SetActive(false));
         renameModal.SetActive(false);
+    }
+
+    // M2-D: 各番線のホーム縁(乗降モード)を一覧表示し、タップで循環させる最小限のUI。
+    // 番線ごとではなくホーム縁ごとに1行(3面2線なら4行)。スクロール実装は行わず、
+    // 最大想定件数(8線×2縁=16行程度)がそのまま収まる高さの固定パネルにする
+    void BuildEdgeModal()
+    {
+        var overlay = Panel("EdgeModal", transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, new Color(0, 0, 0, 0.55f));
+        edgePanel = overlay.gameObject;
+        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
+        box.rectTransform.sizeDelta = new Vector2(600, 760);
+        Label("T", box.transform, "番線ごとの乗降設定", 28, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -56), new Vector2(-24, -16), TextAnchor.MiddleLeft);
+        Label("Hint", box.transform, "タップで 乗降可→乗車専用→降車専用→使用停止 の順に切替", 18, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -84), new Vector2(-24, -60), TextAnchor.MiddleLeft);
+        var rowsGo = new GameObject("Rows");
+        rowsGo.transform.SetParent(box.transform, false);
+        edgeRows = rowsGo.AddComponent<RectTransform>();
+        edgeRows.anchorMin = new Vector2(0, 0);
+        edgeRows.anchorMax = new Vector2(1, 1);
+        edgeRows.offsetMin = new Vector2(16, 70);
+        edgeRows.offsetMax = new Vector2(-16, -92);
+        Btn("Close", box.transform, "閉じる", 26, new Vector2(0.3f, 0), new Vector2(0.7f, 0), new Vector2(0, 14), new Vector2(0, 62), () => edgePanel.SetActive(false));
+        edgePanel.SetActive(false);
+    }
+
+    void OnPlatformEdgesTap()
+    {
+        if (infoStation == null) return;
+        edgePanel.SetActive(true);
+        RefreshEdgeModal();
+    }
+
+    static string EdgeModeLabel(StationLayout.PlatformEdgeMode m) => m switch
+    {
+        StationLayout.PlatformEdgeMode.Normal => "乗降可",
+        StationLayout.PlatformEdgeMode.BoardOnly => "乗車専用",
+        StationLayout.PlatformEdgeMode.AlightOnly => "降車専用",
+        StationLayout.PlatformEdgeMode.Disabled => "使用停止",
+        _ => "?",
+    };
+
+    void RefreshEdgeModal()
+    {
+        for (int i = edgeRows.childCount - 1; i >= 0; i--) Destroy(edgeRows.GetChild(i).gameObject);
+        if (infoStation == null) return;
+        var st = infoStation;
+        var edges = st.PlatformEdges;
+        float rowH = 56, y = 0;
+        for (int i = 0; i < edges.Count; i++)
+        {
+            var e = edges[i];
+            int pf = st.PlatformNumberOf(e.trackIndex);
+            string title = pf + "番線 - " + (e.platformIndex + 1) + "番ホーム";
+            var rowTop = y;
+            var rowBottom = y - rowH;
+            Label("L" + i, edgeRows, title, 20, new Vector2(0, 1), new Vector2(0.55f, 1),
+                new Vector2(0, rowBottom + 4), new Vector2(0, rowTop), TextAnchor.MiddleLeft);
+            int trackIndex = e.trackIndex, side = e.side; // クロージャ用にローカルへ複写
+            Btn("M" + i, edgeRows, EdgeModeLabel(e.mode), 19, new Vector2(0.57f, 1), new Vector2(1, 1),
+                new Vector2(0, rowBottom + 4), new Vector2(0, rowTop),
+                () => CycleEdgeMode(trackIndex, side), new Color(0.26f, 0.42f, 0.5f, 0.95f));
+            y -= rowH + 6;
+        }
+    }
+
+    void CycleEdgeMode(int trackIndex, int side)
+    {
+        if (infoStation == null) return;
+        var st = infoStation;
+        StationLayout.PlatformEdgeMode found = StationLayout.PlatformEdgeMode.Normal;
+        foreach (var e in st.PlatformEdges)
+            if (e.trackIndex == trackIndex && e.side == side) { found = e.mode; break; }
+        var next = (StationLayout.PlatformEdgeMode)(((int)found + 1) % 4);
+        st.SetPlatformEdgeMode(trackIndex, side, next);
+        RefreshEdgeModal();
+        SaveLoad.Save();
     }
 
     void OnRebuildTap()
