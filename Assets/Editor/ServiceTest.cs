@@ -111,6 +111,7 @@ public static class ServiceTest
         go.transform.SetParent(BuildController.WorldRoot, false);
         go.transform.SetPositionAndRotation(pos, Quaternion.identity);
         var st = go.AddComponent<Station>();
+        st.id = ++TrackNetwork.stationIdCounter; // M2-C: id=0の駅はSaveLoad.Saveから除外されるため必須
         st.cars = 8; st.faces = 2; st.lines = 4; st.stationName = name;
         st.Build();
         TrackNetwork.stations.Add(st);
@@ -127,7 +128,7 @@ public static class ServiceTest
                 float d = Vector3.Distance(a.End(sa), b.End(sb));
                 if (d < best) { best = d; bestSa = sa; bestSb = sb; }
             }
-        var seg = new TrackSegment { a = a, b = b, signA = bestSa, signB = bestSb };
+        var seg = new TrackSegment { id = ++TrackNetwork.segmentIdCounter, a = a, b = b, signA = bestSa, signB = bestSb };
         seg.Build(BuildController.WorldRoot);
         TrackNetwork.segments.Add(seg);
     }

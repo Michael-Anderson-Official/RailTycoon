@@ -15,7 +15,7 @@ public static class SaveTest
         var a = MakeStation(new Vector3(-500, 0, 0), 10, 10, 2, 4, "駅1");
         var b = MakeStation(new Vector3(600, 0, 200), -30, 6, 1, 2, "駅2");
         TrackNetwork.nameCounter = 2;
-        var seg = new TrackSegment { a = a, b = b, signA = 1, signB = -1 };
+        var seg = new TrackSegment { id = ++TrackNetwork.segmentIdCounter, a = a, b = b, signA = 1, signB = -1 };
         seg.Build(BuildController.WorldRoot);
         TrackNetwork.segments.Add(seg);
         a.ForceDev(2.5f);
@@ -28,6 +28,7 @@ public static class SaveTest
         var trGo = new GameObject("Train");
         trGo.transform.SetParent(BuildController.WorldRoot, false);
         var tr = trGo.AddComponent<Train>();
+        tr.id = ++TrackNetwork.trainIdCounter; // M2-C: id=0の列車はSaveLoad.Saveから除外されるため必須
         TrackNetwork.trains.Add(tr); // SaveLoad.SaveはTrackNetwork.trainsを列挙するため明示登録が必要(M2-B.1)
         tr.Init(TrainCatalog.Formations[0], new List<Station> { a, b },
             new List<int> { track, b.StopTracks[0] });
@@ -70,6 +71,7 @@ public static class SaveTest
         go.transform.SetParent(BuildController.WorldRoot, false);
         go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0, yaw, 0));
         var st = go.AddComponent<Station>();
+        st.id = ++TrackNetwork.stationIdCounter; // M2-C: id=0の駅はSaveLoad.Saveから除外されるため必須
         st.cars = cars;
         st.faces = faces;
         st.lines = lines;

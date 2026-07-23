@@ -19,10 +19,10 @@ using UnityEngine;
 //   - 列車の削除→再追加(削除された列車はリストから明示的に除去され、新規追加分は末尾に追加)
 //   - セーブ→ロード(SaveLoad.SaveがTrackNetwork.trainsを直接列挙するため、セーブファイル内の
 //     順序=セーブ時点の登録順となり、ロード時のAddComponent呼び出し順もそれに追従する)
-// 【保証範囲外・M2-Cへの残存事項】
-//   - セーブ/ロードをまたいだ完全な決定性(GameRandom内部state・列車の走行位置/速度/残り
-//     Dwell時間はセーブされないため)。登録"順序"は安定するが、シミュレーション結果の
-//     完全な再現性はセーブv2化(今回スコープ外)が必要
+// 【M2-Cでの更新】セーブv2(GameRandom内部state・列車の走行位置/速度/残りDwell時間・
+// 乗車旅客等を保存)導入により、セーブ/ロードをまたいだシミュレーション結果の決定的
+// 継続性はSpeedMultiplierEquivalenceTests等と同様の手法でSaveLoadV2Tests.csが別途検証する。
+// 本ファイルは引き続き「登録順序」という一つの側面に焦点を当てる
 //
 // 【Codexレビュー対応】本番の登録・解除経路(BuildController.DispatchTrain/RemoveStation/
 // DeleteLine)そのものの回帰検出は、既存のバッチテストServiceTest.cs/StationEditTest.csに
@@ -62,6 +62,7 @@ public class TrainRegistrationOrderTests
         var go = new GameObject(name);
         go.transform.SetParent(BuildController.WorldRoot, false);
         var t = go.AddComponent<Train>();
+        t.id = ++TrackNetwork.trainIdCounter; // M2-C: id=0の列車はSaveLoad.Saveから除外されるため必須
         TrackNetwork.trains.Add(t); // 本番のBuildController.DispatchTrain等と同じ明示登録
         return t;
     }
@@ -118,7 +119,9 @@ public class TrainRegistrationOrderTests
         var trainB = MakeTrainStub("TrB");
         trainB.Init(fmB, new List<Station> { b, c }, new List<int> { tb, c.StopTracks[0] });
         var trainC = MakeTrainStub("TrC");
-        trainC.Init(fmC, new List<Station> { c, a }, new List<int> { tc, a.StopTracks[0] });
+        // M2-C: 経路上の隣接駅は実際に線路で結ばれている必要がある(C-Aは未接続、
+        // A-B-Cのみ接続済みのため、C→Bの経路にする)
+        trainC.Init(fmC, new List<Station> { c, b }, new List<int> { tc, b.StopTracks[0] });
 
         var beforeOrder = new List<string>();
         foreach (var t in TrackNetwork.trains) beforeOrder.Add(t.fm.Label);

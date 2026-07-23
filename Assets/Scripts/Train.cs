@@ -5,6 +5,7 @@ using UnityEngine;
 // 発車時に到着駅の線を予約するので、駅間で詰まって止まることはない
 public class Train : MonoBehaviour
 {
+    public int id; // M2-C: セーブ/ロードを跨いで安定な識別子。0は未割当
     public TrainCatalog.Formation fm;
     public List<Station> route;
     public List<int> routeTracks; // 各停車駅で入る番線(trackIdx)。routeと同じ長さ
@@ -18,6 +19,17 @@ public class Train : MonoBehaviour
     enum St { Dwell, Run }
     St state = St.Dwell;
     float dwellT = 5f;
+
+    // M2-C: Dwell中のpathがどちらの由来かを記録する(セーブ用メタデータのみ。
+    // path形状・車両姿勢・運行ロジックには一切影響しない)。
+    // StationLocal = Init()/ResyncToNetwork()が作る駅内3点経路
+    // JustArrivedLeg = Arrive()が到着直前のlegをそのまま残した状態
+    // (Arrive()はpathを再構築しないため、departStationは到着後も直前の出発駅を
+    // 指したまま残る。この由来を区別しないと、セーブ/ロード後のRouteS・前面展望が
+    // 「保存せず継続した場合」と一致しなくなる。CodexReviews/参照)
+    public enum DwellPathKind { StationLocal, JustArrivedLeg }
+    DwellPathKind dwellPathKind = DwellPathKind.StationLocal;
+    public DwellPathKind CurrentDwellPathKind => dwellPathKind;
 
     List<Vector3> path;
     float[] cum;
@@ -64,6 +76,123 @@ public class Train : MonoBehaviour
         PlaceCars();
         state = St.Dwell;
         dwellT = 8f;
+        dwellPathKind = DwellPathKind.StationLocal;
+    }
+
+    // M2-C: SaveLoadV2専用の復元データ。フィールドの意味はTryDepart/Arrive/
+    // ResyncToNetworkが実際に取り得る状態の組み合わせと1対1で対応する。
+    // legSegmentはstate/dwellPathKindの組み合わせに応じて意味が変わる:
+    // Run→走行中の閉塞(BuildLegの再構築と、呼び出し側でのTryEnter適用に使う)、
+    // Dwell+JustArrivedLeg→到着に使った閉塞(path再構築専用。閉塞claimは生成しない)、
+    // Dwell+StationLocal→null(未使用)。
+    // 番線・閉塞の実際の予約適用(TryReserveSpecific/TryEnter)はこのメソッドの外
+    // (SaveLoad側の全列車一括claim検証パス)で行う。ここでは論理状態の設定のみ行う
+    public struct RestoreSpec
+    {
+        public TrainCatalog.Formation formation;
+        public List<Station> route;
+        public List<int> routeTracks;
+        public List<int> lineIds;
+        public bool cyclic;
+        public int idx, dir, curTrack;
+        public bool isRunning; // false=Dwell, true=Run
+        public DwellPathKind dwellPathKind; // isRunning==trueの場合は無視
+        public float dwellT, s, v;
+        public Station departStation; // Dwell/StationLocalではnull
+        public int departTrack;
+        public float releaseS;
+        public bool released; // isRunning==trueの場合のみ意味を持つ
+        public TrackSegment legSegment; // 上記コメント参照
+        public List<(Station dest, int count, Vector3 boardPos)> onboard;
+        public int departureCount, arrivalCount;
+    }
+
+    // 保存データから論理状態を直接設定する(Init()と異なりDwellへ強制初期化しない)。
+    // 呼び出し前提: routeTracks[idx]==curTrack、legSegmentがある場合は
+    // legSegment.HasEndpoint(departStation)とlegSegment.HasEndpoint(route[idx])が
+    // 共に真であることを、呼び出し側(SaveLoad)で事前に検証済みであること
+    public void RestoreState(RestoreSpec spec)
+    {
+        fm = spec.formation;
+        route = spec.route;
+        routeTracks = spec.routeTracks;
+        lineIds = spec.lineIds ?? new List<int>();
+        cyclic = spec.cyclic;
+        idx = spec.idx;
+        dir = spec.dir;
+        curTrack = spec.curTrack;
+        carTs = TrainVisual.BuildCars(transform, fm);
+
+        onboard.Clear();
+        onboardCount = 0;
+        if (spec.onboard != null)
+            foreach (var grp in spec.onboard) { onboard.Add(grp); onboardCount += grp.count; }
+
+        DepartureCount = spec.departureCount;
+        ArrivalCount = spec.arrivalCount;
+
+        var to = route[idx];
+        if (spec.isRunning)
+        {
+            var from = spec.departStation;
+            var seg = spec.legSegment;
+            int exitSign = seg.SignAt(from);
+            int enterSign = seg.SignAt(to);
+            path = BuildLeg(from, spec.departTrack, exitSign, to, curTrack, enterSign, HalfTrain);
+            cum = RailKit.Cumulative(path);
+            float total = cum[cum.Length - 1];
+            s = Mathf.Clamp(spec.s, 0f, total);
+            v = Mathf.Max(0f, spec.v);
+            departStation = from;
+            departTrack = spec.departTrack;
+            released = spec.released;
+            releaseS = spec.releaseS;
+            curSeg = seg;
+            curSegFrom = from;
+            state = St.Run;
+            dwellT = spec.dwellT;
+        }
+        else if (spec.dwellPathKind == DwellPathKind.JustArrivedLeg)
+        {
+            var from = spec.departStation;
+            var seg = spec.legSegment;
+            int exitSign = seg.SignAt(from);
+            int enterSign = seg.SignAt(to);
+            path = BuildLeg(from, spec.departTrack, exitSign, to, curTrack, enterSign, HalfTrain);
+            cum = RailKit.Cumulative(path);
+            s = cum[cum.Length - 1];
+            v = 0;
+            departStation = from;
+            departTrack = spec.departTrack;
+            released = true;
+            curSeg = null;
+            curSegFrom = null;
+            state = St.Dwell;
+            dwellT = spec.dwellT;
+            dwellPathKind = DwellPathKind.JustArrivedLeg;
+        }
+        else
+        {
+            float h = HalfTrain;
+            path = RailKit.Chaikin(new List<Vector3>
+            {
+                to.TrackWorldPoint(curTrack, -h),
+                to.TrackWorldPoint(curTrack, 0),
+                to.TrackWorldPoint(curTrack, h),
+            }, 1);
+            cum = RailKit.Cumulative(path);
+            s = cum[cum.Length - 1];
+            v = 0;
+            departStation = null;
+            departTrack = 0;
+            released = true;
+            curSeg = null;
+            curSegFrom = null;
+            state = St.Dwell;
+            dwellT = spec.dwellT;
+            dwellPathKind = DwellPathKind.StationLocal;
+        }
+        PlaceCars();
     }
 
     // Bootstrap.SimTickから固定tickごとに呼ばれるシミュレーション本体。
@@ -186,6 +315,7 @@ public class Train : MonoBehaviour
         state = St.Dwell;
         dwellT = 25f;
         v = 0;
+        dwellPathKind = DwellPathKind.JustArrivedLeg;
     }
 
     int Board(Station st)
@@ -263,6 +393,7 @@ public class Train : MonoBehaviour
         PlaceCars();
         state = St.Dwell;
         dwellT = 6f;
+        dwellPathKind = DwellPathKind.StationLocal;
     }
 
     void SetRouteTrack(int i, int track)
@@ -275,6 +406,9 @@ public class Train : MonoBehaviour
     public void PlaceCars() => PlaceCarsStatic(carTs, path, cum, s);
 
     public float SpeedKmh => v * 3.6f;
+    // M2-C: セーブ用。SpeedKmh(*3.6f)経由の往復はfloat丸め誤差が後続tickへ伝播し得るため、
+    // 内部値をbit-exactに読み書きできる専用アクセサを用意する
+    public float V => v;
 
     // M2-B.2: ×1/×5/×20比較テスト用の読み取り専用観測プロパティ。挙動は変えない
     public bool IsDwelling => state == St.Dwell;
@@ -284,6 +418,13 @@ public class Train : MonoBehaviour
     public int OnboardCount => onboardCount;
     public int DepartureCount { get; private set; }
     public int ArrivalCount { get; private set; }
+
+    // M2-C: セーブ用の読み取り専用観測プロパティ。挙動は変えない
+    public Station DepartStation => departStation;
+    public int DepartTrack => departTrack;
+    public float ReleaseS => releaseS;
+    public TrackSegment CurSeg => curSeg; // Run中のみ非null
+    public IReadOnlyList<(Station dest, int count, Vector3 boardPos)> Onboard => onboard;
 
     // 前面展望カメラ用: 先頭車前端の位置と進行方向
     public void CabPose(out Vector3 pos, out Vector3 fwd)

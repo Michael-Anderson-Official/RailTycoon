@@ -5,6 +5,7 @@ using UnityEngine;
 // ローカル座標系: 駅軸=+z、横=+x。transformのY回転で向きを決める
 public class Station : MonoBehaviour
 {
+    public int id; // M2-C: セーブ/ロードを跨いで安定な識別子。0は未割当(preview等)
     public int cars = 6, faces = 2, lines = 2;
     public string stationName = "駅";
     public bool preview;
@@ -39,6 +40,9 @@ public class Station : MonoBehaviour
 
     // M2-B.2: ×1/×5/×20比較テスト用の読み取り専用観測プロパティ。挙動は変えない
     public double SpawnAccumulator => spawnAcc;
+
+    // M2-C: セーブロード復元専用(SaveLoadと同一アセンブリ内からのみ呼ばれる想定)
+    internal void RestoreSpawnAccumulator(double v) => spawnAcc = v;
 
     // 子メッシュを(再)生成する。パラメータ変更後に呼び直せる
     public void Build()
@@ -92,11 +96,15 @@ public class Station : MonoBehaviour
         // 街はCityGridがワールドグリッド上にまとめて生成する(駅の子ではない)
     }
 
-    // 接続済みの端 [0]=sign-1, [1]=sign+1
-    bool[] GetConnectedEnds()
+    // 接続済みの端 [0]=sign-1, [1]=sign+1。
+    // segmentsOverrideを渡した場合はTrackNetwork.segments(生きたワールド)ではなく
+    // それを参照する(M2-C: セーブロードのstaging中、まだTrackNetworkへ登録していない
+    // 段階で正しい接続状態を計算するために必要)
+    bool[] GetConnectedEnds(IReadOnlyList<TrackSegment> segmentsOverride = null)
     {
+        var segs = segmentsOverride ?? (IReadOnlyList<TrackSegment>)TrackNetwork.segments;
         var c = new bool[2];
-        foreach (var seg in TrackNetwork.segments)
+        foreach (var seg in segs)
         {
             if (seg.a == this) c[seg.signA > 0 ? 1 : 0] = true;
             if (seg.b == this) c[seg.signB > 0 ? 1 : 0] = true;
@@ -132,7 +140,7 @@ public class Station : MonoBehaviour
 
     // 線路・渡り線・車止めを接続状態に応じて再生成(TrackWork子にまとめる)。
     // 線路の接続/撤去/ロード時に呼ぶと、繋がった端は貫通・未接続の端は頭端(車止め)になる
-    public void RebuildTrackVisual()
+    public void RebuildTrackVisual(IReadOnlyList<TrackSegment> segmentsOverride = null)
     {
         if (layout.trackOffsets == null) return;
         var old = transform.Find("TrackWork");
@@ -140,7 +148,7 @@ public class Station : MonoBehaviour
         var tw = new GameObject("TrackWork");
         tw.transform.SetParent(transform, false);
 
-        var conn = GetConnectedEnds();
+        var conn = GetConnectedEnds(segmentsOverride);
         float H = HalfLen, T = StationLayout.ThroatLen, L = StationLayout.LeadLen;
         var ballast = new RailKit.MeshData();
         var rail = new RailKit.MeshData();

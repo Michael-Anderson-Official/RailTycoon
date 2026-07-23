@@ -4,6 +4,7 @@ using UnityEngine;
 // 駅間を結ぶ複線区間。両駅のスロート収束点(End)同士を直線で結ぶ
 public class TrackSegment
 {
+    public int id; // M2-C: セーブ/ロードを跨いで安定な識別子。0は未割当
     public Station a, b;
     public int signA, signB;  // 各駅のどちらの端に接続するか(±1)
     public GameObject go;
@@ -17,6 +18,10 @@ public class TrackSegment
 
     public int SignAt(Station s) => s == a ? signA : signB;
     public Station Other(Station s) => s == a ? b : a;
+    // M2-C: SignAt/Other/DirIndex/TryEnter/Leaveは全て「aでなければb」という前提で
+    // 動くため、復元時に不正なfromを渡すと誤った側として扱われてしまう。
+    // 呼び出し前にこれで実際にa/bのどちらかであることを検証すること
+    public bool HasEndpoint(Station s) => s == a || s == b;
 
     int DirIndex(Station from) => from == a ? 0 : 1;
 
@@ -91,6 +96,13 @@ public static class TrackNetwork
     public static readonly List<Train> trains = new List<Train>();
     public static int nameCounter;
 
+    // M2-C: 駅・線路・列車の安定ID発行カウンタ。ServiceLine.id/Services.idCounter
+    // (既存の運行系統の安定ID方式)と同じ「型ごとの単調増加int」パターンを踏襲する。
+    // 0は「未割当」を表す不正値として予約するため、次に発行するIDは常に(++counter)
+    public static int stationIdCounter;
+    public static int segmentIdCounter;
+    public static int trainIdCounter;
+
     static readonly Dictionary<Station, HashSet<Station>> reachCache = new Dictionary<Station, HashSet<Station>>();
 
     public static void Clear()
@@ -100,6 +112,9 @@ public static class TrackNetwork
         trains.Clear();
         reachCache.Clear();
         nameCounter = 0;
+        stationIdCounter = 0;
+        segmentIdCounter = 0;
+        trainIdCounter = 0;
     }
 
     public static void MarkDirty() => reachCache.Clear();
@@ -112,6 +127,27 @@ public static class TrackNetwork
     }
 
     public static bool Connected(Station x, Station y) => Find(x, y) != null;
+
+    public static Station StationById(int id)
+    {
+        if (id == 0) return null;
+        foreach (var s in stations) if (s.id == id) return s;
+        return null;
+    }
+
+    public static TrackSegment SegmentById(int id)
+    {
+        if (id == 0) return null;
+        foreach (var s in segments) if (s.id == id) return s;
+        return null;
+    }
+
+    public static Train TrainById(int id)
+    {
+        if (id == 0) return null;
+        foreach (var t in trains) if (t.id == id) return t;
+        return null;
+    }
 
     // sと同じ連結成分の他駅(乗客の行き先候補)
     public static HashSet<Station> Reachable(Station s)

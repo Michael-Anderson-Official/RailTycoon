@@ -41,6 +41,35 @@ public class BuildController : MonoBehaviour
         }
     }
 
+    // M2-C: SaveLoadがロードを一括コミットする際に使う。既存のWorldRootを破棄し、
+    // 事前に(WorldRootの外で)組み立てた駅・線路・列車一式をまとめて差し替える。
+    // 検証途中で失敗した場合はSaveLoad側が新root自体を破棄するため、ここが
+    // 呼ばれるのは「全て成功した」ことが確定した後だけ
+    internal static void ReplaceWorldRoot(Transform newRoot)
+    {
+        if (worldRoot != null) Object.DestroyImmediate(worldRoot.gameObject);
+        newRoot.gameObject.name = "World";
+        worldRoot = newRoot;
+        // 旧WorldRoot配下の駅・線路・列車を指していた可能性のある、進行中の
+        // 建設・経路選択・配車操作の状態を全てセッション初期状態へ戻す
+        // (実装後レビューでCodex CLIが指摘。現状の製品コードではLoad()はBootstrap起動時
+        // のみ呼ばれるため実際には空だが、ReplaceWorldRootを汎用APIとして安全にするため)
+        if (Instance != null)
+        {
+            Instance.previewStation = null;
+            Instance.rebuildTarget = null;
+            Instance.trackFirst = null;
+            if (Instance.trackMarker != null) Object.DestroyImmediate(Instance.trackMarker);
+            Instance.trackMarker = null;
+            Instance.selLines.Clear();
+            Instance.routeSel.Clear();
+            Instance.routeTrackSel.Clear();
+            Instance.pendingStation = null;
+            foreach (var m in Instance.routeMarkers) if (m != null) Object.DestroyImmediate(m);
+            Instance.routeMarkers.Clear();
+        }
+    }
+
     void Awake() => Instance = this;
 
     public void SetMode(Mode m)
@@ -149,6 +178,7 @@ public class BuildController : MonoBehaviour
         var st = previewStation;
         previewStation = null;
         st.preview = false;
+        st.id = ++TrackNetwork.stationIdCounter;
         st.stationName = "駅" + (++TrackNetwork.nameCounter);
         st.gameObject.name = st.stationName;
         st.UpdateLabel();
@@ -305,7 +335,7 @@ public class BuildController : MonoBehaviour
             UIController.Toast("資金不足(" + (cost / 1e8).ToString("F1") + "億円必要)");
             return;
         }
-        var seg = new TrackSegment { a = a, b = st, signA = bestSa, signB = bestSb };
+        var seg = new TrackSegment { id = ++TrackNetwork.segmentIdCounter, a = a, b = st, signA = bestSa, signB = bestSb };
         seg.Build(WorldRoot);
         TrackNetwork.segments.Add(seg);
         a.RebuildTrackVisual();     // 接続した端を貫通(車止め除去)に
@@ -521,6 +551,7 @@ public class BuildController : MonoBehaviour
         var go = new GameObject("Train_" + selFormation.Label);
         go.transform.SetParent(WorldRoot, false);
         var t = go.AddComponent<Train>();
+        t.id = ++TrackNetwork.trainIdCounter;
         TrackNetwork.trains.Add(t);
         t.Init(selFormation, route, tracks, startIdx, 1);
         t.lineIds = lineIds;

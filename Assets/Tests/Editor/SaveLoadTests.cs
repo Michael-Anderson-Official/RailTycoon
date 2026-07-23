@@ -60,6 +60,7 @@ public class SaveLoadTests
         var trGo = new GameObject("Train");
         trGo.transform.SetParent(BuildController.WorldRoot, false);
         var tr = trGo.AddComponent<Train>();
+        tr.id = ++TrackNetwork.trainIdCounter; // M2-C: id=0の列車はSaveLoad.Saveから除外されるため必須
         TrackNetwork.trains.Add(tr); // SaveLoad.SaveはTrackNetwork.trainsを列挙するため明示登録が必要
         tr.Init(TrainCatalog.Formations[0], new List<Station> { a, b },
             new List<int> { track, b.StopTracks[0] });

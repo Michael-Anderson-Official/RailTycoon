@@ -11,6 +11,7 @@ public static class EditModeTestHelpers
         go.transform.SetParent(BuildController.WorldRoot, false);
         go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0, yaw, 0));
         var st = go.AddComponent<Station>();
+        st.id = ++TrackNetwork.stationIdCounter; // M2-C: BuildController.ConfirmStationと同じ安定ID付与
         st.cars = cars;
         st.faces = faces;
         st.lines = lines;
@@ -31,7 +32,7 @@ public static class EditModeTestHelpers
                 float d = Vector3.Distance(a.End(sa), b.End(sb));
                 if (d < best) { best = d; bestSa = sa; bestSb = sb; }
             }
-        var seg = new TrackSegment { a = a, b = b, signA = bestSa, signB = bestSb };
+        var seg = new TrackSegment { id = ++TrackNetwork.segmentIdCounter, a = a, b = b, signA = bestSa, signB = bestSb };
         seg.Build(BuildController.WorldRoot);
         TrackNetwork.segments.Add(seg);
         return seg;
