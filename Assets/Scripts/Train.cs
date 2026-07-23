@@ -158,10 +158,12 @@ public class Train : MonoBehaviour
         curTrack = destTrack;
         idx = next;
         state = St.Run;
+        DepartureCount++;
     }
 
     void Arrive()
     {
+        ArrivalCount++;
         if (!released) { released = true; departStation.Release(departTrack); }
         if (curSeg != null)
         {
@@ -273,6 +275,15 @@ public class Train : MonoBehaviour
     public void PlaceCars() => PlaceCarsStatic(carTs, path, cum, s);
 
     public float SpeedKmh => v * 3.6f;
+
+    // M2-B.2: ×1/×5/×20比較テスト用の読み取り専用観測プロパティ。挙動は変えない
+    public bool IsDwelling => state == St.Dwell;
+    public float DwellRemaining => dwellT;
+    public float RouteS => s;
+    public bool DepartureTrackReleased => released;
+    public int OnboardCount => onboardCount;
+    public int DepartureCount { get; private set; }
+    public int ArrivalCount { get; private set; }
 
     // 前面展望カメラ用: 先頭車前端の位置と進行方向
     public void CabPose(out Vector3 pos, out Vector3 fwd)

@@ -34,6 +34,9 @@ public class TrackSegment
         if (occupant[i] == t) occupant[i] = null;
     }
 
+    // M2-B.2: ×1/×5/×20比較テスト用の読み取り専用観測プロパティ。挙動は変えない
+    public Train OccupantFrom(Station from) => occupant[DirIndex(from)];
+
     public void Build(Transform parent)
     {
         if (go != null)

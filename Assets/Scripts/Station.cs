@@ -14,7 +14,9 @@ public class Station : MonoBehaviour
     public bool[] occupied;
     public readonly Dictionary<Station, int> waiting = new Dictionary<Station, int>();
     public int developed; // CityGridが建てた棟数
-    float spawnAcc;
+    // M2-B.2で発覚: floatのまま数千回加算し続けると丸め誤差が蓄積し、
+    // 速度倍率(=1tickあたりの加算回数)によって最終的な発生人数がズレ得るためdouble化
+    double spawnAcc;
     TextMesh label;
     readonly List<GameObject> platformLabels = new List<GameObject>(); // 番線選択中に各停車線へ浮かべる番号
 
@@ -34,6 +36,9 @@ public class Station : MonoBehaviour
     }
 
     public int WaitingCap => faces * cars * 60;
+
+    // M2-B.2: ×1/×5/×20比較テスト用の読み取り専用観測プロパティ。挙動は変えない
+    public double SpawnAccumulator => spawnAcc;
 
     // 子メッシュを(再)生成する。パラメータ変更後に呼び直せる
     public void Build()
