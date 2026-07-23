@@ -7,6 +7,29 @@ public class Bootstrap : MonoBehaviour
     // 固定tick間隔。Awakeで Application.targetFrameRate=60 を指定しており、
     // 既存の列車速度・加減速・乗客生成レートはこの前提で調整されてきたため、
     // それに最も近い刻みを採用し既存バランスへの影響を最小化する
+    //
+    // 【tick頻度と速度倍率(GameState.timeScale)の関係(M2-B.1で明文化)】
+    // tick頻度(1秒あたりのSimTick呼出回数)はTime.unscaledDeltaTimeのみで決まり、
+    // GameState.timeScaleには一切依存しない(SimTick()内のsimDt計算でのみ登場する)。
+    // つまり×1/×5/×20いずれでも、実時間1秒あたりに必要なtickは同じ(最大60回/秒、
+    // 実フレームレート次第)。速度倍率は「1tickが表すシミュレーション秒数」だけを
+    // 増やす(×20なら1tick=1/60*20=1/3シミュレーション秒)。
+    // 実測: 京王5000系(vmax=110km/h, decel=4.0km/h/s)基準で、×20時の1tick移動距離は
+    // 約10.2m、停止制御(vAllow=√(2*decel*rem)を毎tick再計算する閉ループ式)による
+    // 最大オーバーシュートは d*dt²/2 ≈ 6.17cmで実用上問題ない
+    // (Codex CLIによる独立検証・数式で確認済み、2026-07-23)。
+    //
+    // 【オーバーロードの分類】
+    // - 通常の低FPS(例: 安定20fps): 1フレームあたり最大 20/60≈1.33→2tick程度。切り捨てなし
+    // - 一時的なフレーム落ち(単発の重いフレーム): 単発なら8tick(133ms)以内に収まることが多く
+    //   切り捨てなし。133ms(≈7.5fps相当)を単発で超えた場合のみ、そのフレームだけ切り捨てが発生
+    // - 数秒以上のアプリ停止(一時停止/バックグラウンド化等): 復帰後最初のAdvance呼び出しで
+    //   ほぼ確実に上限到達し、停止していた実時間のほぼ全てが切り捨てられる(意図した挙動。
+    //   Application.runInBackground=trueのためバックグラウンド中も本来Updateは走り得るが、
+    //   一時停止(GameState.paused)中はaccumulatorへの加算自体を止めているため無関係)
+    // - ×20実行中の処理超過: 上記のとおりtick頻度は速度倍率と無関係なため、「×20だから
+    //   起きやすい」という追加リスクは無い。オーバーロードの発生条件は速度倍率によらず
+    //   常に「実フレームレート」のみで決まる
     public const float TickSeconds = 1f / 60f;
     // 1フレームで消化する最大tick数。60Hz基準で約133ms分の遅延まで同一フレームで
     // 消化する。これを超える遅延(フレーム落ち)ではシミュレーション時間の一部を
@@ -15,6 +38,12 @@ public class Bootstrap : MonoBehaviour
     public const int MaxTicksPerFrame = 8;
 
     readonly FixedStepAccumulator accumulator = new FixedStepAccumulator(TickSeconds, MaxTicksPerFrame);
+
+    // オーバーロードの可観測性(デバッグ用)。黙って時間を捨てず、UIやログから参照できるようにする
+    public int OverloadCount => accumulator.MaxTicksReachedCount;
+    public int DroppedTickCount => accumulator.DroppedTickCount;
+    public float DroppedSimulationTime => accumulator.DroppedSimulationTime;
+    public float BacklogTime => accumulator.Accumulator;
 
     void Awake()
     {

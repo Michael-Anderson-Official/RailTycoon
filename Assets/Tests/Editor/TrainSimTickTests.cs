@@ -59,4 +59,44 @@ public class TrainSimTickTests
         Assert.That(avgSpeed, Is.LessThanOrEqualTo(vmax * 1.05f), "最高速度を超えないこと");
         Assert.That(avgSpeed, Is.GreaterThanOrEqualTo(vmax * 0.5f), "60秒走行後には十分に加速していること");
     }
+
+    // ×20相当(simDt=tick*20)の粗いtickでも、列車がA-B間の線路範囲を大きく逸脱しない
+    // (=粗大なオーバーシュート/テレポートが起きない)ことを確認する。
+    // 理論上の停止時最大オーバーシュートは d*dt²/2 ≈ 6.17cm(京王5000系・×20相当、
+    // Codex CLIレビューで数式検証済み)。ただしA-B2駅だけを直結するとTrain.Init()の
+    // cyclic判定によりA⇄B往復になり、任意のtick数後に列車が走行中か停車中か・
+    // どちらへ向かっているかを一意に特定できないため、本テストでは「停止目標付近で
+    // 静止していること」ではなく「線路の敷設範囲(+余裕)を逸脱していないこと」という
+    // より頑健な粗大故障検出で判定する
+    [Test]
+    public void SimTick_AtHighTimeScale_StaysWithinTrackBounds()
+    {
+        const float StationX = 4000f;
+        var a = EditModeTestHelpers.MakeStation(new Vector3(-StationX, 0, 0), 90, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(StationX, 0, 0), 90, 10, 2, 2, "B");
+        EditModeTestHelpers.Connect(a, b);
+
+        var fm = TrainCatalog.Formations[0]; // 京王5000系、maxSpeedKmh=110, decelKmhs=4.0
+        int trackA;
+        a.TryReserve(out trackA);
+        var go = new GameObject("Train");
+        go.transform.SetParent(BuildController.WorldRoot, false);
+        var train = go.AddComponent<Train>();
+        train.Init(fm, new List<Station> { a, b }, new List<int> { trackA, b.StopTracks[0] });
+
+        float bigDt = Bootstrap.TickSeconds * 20f; // ×20相当の1tickぶんのシミュレーション秒数
+        var lead = go.transform.GetChild(0);
+        // 8000m区間をA⇄B往復させながら、毎tick位置がスロート分の余裕(+300m)を超えて
+        // 逸脱しないことを継続的に確認する(単発の最終位置だけでなく全tickで検査することで、
+        // 走行中の一時的な吹き飛びも見逃さない)
+        for (int i = 0; i < 2000; i++)
+        {
+            train.SimTick(bigDt);
+            train.PlaceCars();
+            Assert.That(lead.position.x, Is.InRange(-StationX - 300f, StationX + 300f),
+                $"tick {i}: 粗いtickでも線路の敷設範囲(X)を大きく逸脱しないこと");
+            Assert.That(Mathf.Abs(lead.position.z), Is.LessThan(50f),
+                $"tick {i}: 粗いtickでも線路の敷設範囲(Z、直線区間の中心線からの逸脱)を大きく逸脱しないこと");
+        }
+    }
 }

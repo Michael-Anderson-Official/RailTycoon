@@ -75,7 +75,14 @@ public static class TrackNetwork
 {
     public static readonly List<Station> stations = new List<Station>();
     public static readonly List<TrackSegment> segments = new List<TrackSegment>();
-    // 列車の安定した中央リスト(登録順)。Train.OnEnable/OnDisableで自己登録・解除する。
+    // 列車の安定した中央リスト(登録順)。stations/segmentsと同じく、生成側が
+    // 明示的にAdd/Removeする(Train.OnEnable/OnDisableには依存しない)。
+    // 【M2-B.1での変更理由】OnEnable/OnDisableでの自己登録を試みたが、EditModeの
+    // Unity Test Framework実行下ではAddComponent直後にOnEnableが確実に発火しない
+    // ことが判明した(PlayModeでは正常に発火する。既存コードのTrackTest.csにも
+    // 同種の既知の注記「EditモードはAwakeが呼ばれない」がある)。このためTrain生成・
+    // 破棄の全箇所(BuildController.DispatchTrain/RemoveStation/DeleteLine、
+    // SaveLoad.Load)で明示的にAdd/Removeする方式に統一した。
     // Bootstrap.SimTickがここを固定順で回すことで、Unity既定のUpdate呼び出し順に
     // 依存しない決定的なtick処理を実現する
     public static readonly List<Train> trains = new List<Train>();

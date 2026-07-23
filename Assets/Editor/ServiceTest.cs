@@ -42,8 +42,12 @@ public static class ServiceTest
         var trains = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
         bool dispatchOk = trains.Length == 2;
         foreach (var t in trains) if (t.lineIds == null || !t.lineIds.Contains(line.id)) dispatchOk = false;
-        Debug.Log("ServiceTest: dispatch trains=" + trains.Length + " lineTrainCount=" + line.TrainCount);
-        pass &= dispatchOk && line.TrainCount == 2;
+        // TrackNetwork.trainsもDispatchTrain経由で正しく登録されていること
+        // (M2-B.1でOnEnable自己登録から明示登録へ変更した箇所の回帰検出)
+        bool registryOk = TrackNetwork.trains.Count == 2;
+        Debug.Log("ServiceTest: dispatch trains=" + trains.Length + " lineTrainCount=" + line.TrainCount
+            + " registryCount=" + TrackNetwork.trains.Count);
+        pass &= dispatchOk && line.TrainCount == 2 && registryOk;
 
         // --- セーブ→全消去→ロード ---
         SaveLoad.Save();
@@ -52,8 +56,9 @@ public static class ServiceTest
         Services.Clear();
         bool loaded = SaveLoad.Load();
         var trains2 = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
+        // SaveLoad.Load経由でもTrackNetwork.trainsが正しく再構築されていること(同上の回帰検出)
         bool loadOk = loaded && Services.lines.Count == 1 && Services.lines[0].typeIdx == 0
-            && Services.lines[0].route.Count == 3 && trains2.Length == 2;
+            && Services.lines[0].route.Count == 3 && trains2.Length == 2 && TrackNetwork.trains.Count == 2;
         var line2 = Services.lines.Count > 0 ? Services.lines[0] : null;
         if (line2 != null) foreach (var t in trains2) if (t.lineIds == null || !t.lineIds.Contains(line2.id)) loadOk = false;
         Debug.Log("ServiceTest: reload loaded=" + loaded + " lines=" + Services.lines.Count
@@ -64,9 +69,12 @@ public static class ServiceTest
         double before = GameState.money;
         if (line2 != null) bc.DeleteLine(line2);
         var trains3 = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
-        bool delOk = Services.lines.Count == 0 && trains3.Length == 0 && GameState.money > before;
+        // DeleteLine経由でTrackNetwork.trainsからも正しく解除されていること(同上の回帰検出)
+        bool delOk = Services.lines.Count == 0 && trains3.Length == 0 && GameState.money > before
+            && TrackNetwork.trains.Count == 0;
         Debug.Log("ServiceTest: delete lines=" + Services.lines.Count + " trains=" + trains3.Length
-            + " refund=" + ((GameState.money - before) / 1e8).ToString("F2") + "億円");
+            + " refund=" + ((GameState.money - before) / 1e8).ToString("F2") + "億円"
+            + " registryCount=" + TrackNetwork.trains.Count);
         pass &= delOk;
 
         // --- 複数系統の運用: 各停A→B→C と 各停C→B→A を連結 ---

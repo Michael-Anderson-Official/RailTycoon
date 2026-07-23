@@ -88,4 +88,30 @@ public class PassengerGenerationTests
             Assert.That(withUnityRandomB[key], Is.EqualTo(withUnityRandomA[key]),
                 "UnityEngine.Randomの状態を変えても結果が変わらないこと(GameRandomのみに依存)");
     }
+
+    // WaitingCap直前の状態で、1tickにn≧2人ぶんが一気に発生する状況(粗いsimDt/高DevLevelで
+    // 起こり得る)でも、WaitingCapを超過しないこと。
+    // 【Codexレビューで発見された実バグ】旧実装はtick冒頭で TotalWaiting>=WaitingCap のみ
+    // 判定し、ループ内のn人追加そのものはcap残量で丸めていなかったため、
+    // TotalWaiting=WaitingCap-1 かつ n>=2 の状況で超過し得た。修正: n = min(n, cap残量)。
+    // このテストはランダムな蓄積ではなく、waitingを直接cap直前にセットし、1回のTickで
+    // 確実にn>=2を発生させる大きなdtMinを与えることで、修正の効果を決定的に検証する
+    [Test]
+    public void PassengerBurst_AtCapBoundary_NeverExceedsWaitingCap()
+    {
+        var center = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 0), 0, 6, 2, 2, "中心");
+        var a = EditModeTestHelpers.MakeStation(new Vector3(-900, 0, 0), 0, 6, 2, 2, "A");
+        EditModeTestHelpers.Connect(center, a);
+        GameRandom.Seed(4242u);
+
+        // WaitingCap直前まで既に待ち客がいる状況を直接作る
+        center.waiting[a] = center.WaitingCap - 1;
+
+        // 十分に大きなdtMinを与え、1回のTickで確実にn>=2(実際はn>>2)を発生させる
+        // (rate = 0.8 + 0.6*DevLevel ≈ 0.8以上なので、dtMin=100なら spawnAcc≈80以上 → n≈80)
+        center.Tick(100f);
+
+        Assert.That(center.TotalWaiting, Is.EqualTo(center.WaitingCap),
+            "cap直前からn>=2の一括発生があっても、ちょうどWaitingCapで頭打ちになること(超過しない)");
+    }
 }

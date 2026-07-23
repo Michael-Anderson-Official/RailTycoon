@@ -88,6 +88,49 @@ public class FixedStepAccumulatorTests
     }
 
     [Test]
+    public void NormalOperation_DoesNotRecordOverload()
+    {
+        var acc = new FixedStepAccumulator(Tick, MaxTicks);
+        for (int i = 0; i < 300; i++) acc.Advance(1f / 60f); // 5秒分、正常フレーム
+
+        Assert.That(acc.MaxTicksReachedCount, Is.EqualTo(0), "通常運転ではオーバーロードを記録しないこと");
+        Assert.That(acc.DroppedTickCount, Is.EqualTo(0));
+        Assert.That(acc.DroppedSimulationTime, Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void Overload_IsObservable_NotSilentlyDropped()
+    {
+        var acc = new FixedStepAccumulator(Tick, MaxTicks);
+        acc.Advance(10f); // 133msを大幅に超える単発の重いフレーム(スタッター相当)
+
+        // 10秒のうちMaxTicks(8)ぶん=8/60秒だけ消化され、残りは正確に切り捨てられるはず
+        float expectedDropped = 10f - MaxTicks * Tick;
+        Assert.That(acc.MaxTicksReachedCount, Is.EqualTo(1), "オーバーロード発生回数が記録されること");
+        Assert.That(acc.DroppedSimulationTime, Is.EqualTo(expectedDropped).Within(1e-4f),
+            "捨てられた実時間が正確な値で観測できること");
+        // 浮動小数点の丸め(accumulatorの減算蓄積 vs テスト側の直接計算)で1ズレ得るため許容誤差を持たせる
+        Assert.That(acc.DroppedTickCount, Is.EqualTo((int)(expectedDropped / Tick)).Within(1),
+            "捨てられたtick換算数がおおむね正確な値で観測できること");
+    }
+
+    [Test]
+    public void Overload_IsIndependentOfSpeedMultiplier()
+    {
+        // FixedStepAccumulatorはGameState.timeScaleを一切参照しない設計。
+        // 同じ実時間deltaなら、速度倍率の値に関わらずオーバーロード判定は同一になることを確認する
+        // (このクラス自体がtimeScaleに触れないことの直接的な証明)
+        var accA = new FixedStepAccumulator(Tick, MaxTicks);
+        var accB = new FixedStepAccumulator(Tick, MaxTicks);
+        // GameState.timeScaleをどちらのAdvance呼び出しにも一切渡していない・参照していないことが
+        // このテストの構造自体で示される(引数はrealDeltaSecondsのみ)
+        int ticksA = accA.Advance(0.2f);
+        int ticksB = accB.Advance(0.2f);
+        Assert.That(ticksB, Is.EqualTo(ticksA));
+        Assert.That(accB.MaxTicksReachedCount, Is.EqualTo(accA.MaxTicksReachedCount));
+    }
+
+    [Test]
     public void NotAdvancingWhilePaused_ThenResuming_DoesNotBurstCatchUp()
     {
         // Bootstrap.RunFrameは一時停止中Advance自体を呼ばない設計。

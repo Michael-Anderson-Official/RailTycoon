@@ -238,6 +238,7 @@ public class BuildController : MonoBehaviour
             refund += t.RefundValue;
             removedTrains++;
             t.ReleaseAll();               // 隣駅などに残る予約を解放してから破棄
+            TrackNetwork.trains.Remove(t);
             DestroySafe(t.gameObject);
         }
         var neighbors = new List<Station>();
@@ -458,6 +459,7 @@ public class BuildController : MonoBehaviour
             if (t.lineIds == null || !t.lineIds.Contains(line.id)) continue;
             refund += t.RefundValue; n++;
             t.ReleaseAll();
+            TrackNetwork.trains.Remove(t);
             DestroySafe(t.gameObject);
         }
         Services.lines.Remove(line);
@@ -519,6 +521,7 @@ public class BuildController : MonoBehaviour
         var go = new GameObject("Train_" + selFormation.Label);
         go.transform.SetParent(WorldRoot, false);
         var t = go.AddComponent<Train>();
+        TrackNetwork.trains.Add(t);
         t.Init(selFormation, route, tracks, startIdx, 1);
         t.lineIds = lineIds;
         SaveLoad.Save();

@@ -27,7 +27,9 @@ public static class SaveTest
         a.TryReserve(out track);
         var trGo = new GameObject("Train");
         trGo.transform.SetParent(BuildController.WorldRoot, false);
-        trGo.AddComponent<Train>().Init(TrainCatalog.Formations[0], new List<Station> { a, b },
+        var tr = trGo.AddComponent<Train>();
+        TrackNetwork.trains.Add(tr); // SaveLoad.SaveはTrackNetwork.trainsを列挙するため明示登録が必要(M2-B.1)
+        tr.Init(TrainCatalog.Formations[0], new List<Station> { a, b },
             new List<int> { track, b.StopTracks[0] });
 
         SaveLoad.Save();

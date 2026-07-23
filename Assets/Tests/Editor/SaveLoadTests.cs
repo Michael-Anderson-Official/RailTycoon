@@ -59,7 +59,9 @@ public class SaveLoadTests
         Assert.That(a.TryReserve(out int track), Is.True);
         var trGo = new GameObject("Train");
         trGo.transform.SetParent(BuildController.WorldRoot, false);
-        trGo.AddComponent<Train>().Init(TrainCatalog.Formations[0], new List<Station> { a, b },
+        var tr = trGo.AddComponent<Train>();
+        TrackNetwork.trains.Add(tr); // SaveLoad.SaveはTrackNetwork.trainsを列挙するため明示登録が必要
+        tr.Init(TrainCatalog.Formations[0], new List<Station> { a, b },
             new List<int> { track, b.StopTracks[0] });
 
         SaveLoad.Save();

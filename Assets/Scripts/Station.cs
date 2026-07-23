@@ -305,6 +305,10 @@ public class Station : MonoBehaviour
         int n = (int)spawnAcc;
         if (n <= 0) return;
         spawnAcc -= n;
+        // 粗いtick(高いsimDt)では1tickでnが2以上になり得るため、WaitingCap残量で
+        // 上限を切る(切らないとWaitingCapを超過し得るバグをCodexレビューで指摘された)
+        n = Mathf.Min(n, WaitingCap - TotalWaiting);
+        if (n <= 0) return;
         // reach(HashSet)は列挙順が保証されないため、TrackNetwork.stationsの登録順で
         // フィルタして安定させる(同一seed・同一手順で同じ行き先分布になるようにするため)
         float totalW = 0;

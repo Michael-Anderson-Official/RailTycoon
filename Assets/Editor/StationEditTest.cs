@@ -27,7 +27,9 @@ public static class StationEditTest
         int ta; a.TryReserve(out ta);
         var trGo = new GameObject("Train");
         trGo.transform.SetParent(BuildController.WorldRoot, false);
-        trGo.AddComponent<Train>().Init(TrainCatalog.Formations[5],
+        var trInit = trGo.AddComponent<Train>();
+        TrackNetwork.trains.Add(trInit); // RemoveStationの明示解除を意味あるものにするため登録(M2-B.1)
+        trInit.Init(TrainCatalog.Formations[5],
             new List<Station> { a, b, c }, new List<int> { ta, b.StopTracks[0], c.StopTracks[0] });
 
         bool pass = true;
@@ -61,9 +63,13 @@ public static class StationEditTest
         var segsAfter = TrackNetwork.segments.Count;
         var trainsAfterRemove = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
         double refund = GameState.money - moneyBeforeRemove;
-        bool removeOk = stationsAfter == 2 && segsAfter == 1 && trainsAfterRemove.Length == 0 && refund > 0;
+        // RemoveStation経由でもTrackNetwork.trainsから正しく解除されていること
+        // (M2-B.1でOnEnable自己登録から明示登録へ変更した箇所の回帰検出)
+        bool removeOk = stationsAfter == 2 && segsAfter == 1 && trainsAfterRemove.Length == 0 && refund > 0
+            && TrackNetwork.trains.Count == 0;
         Debug.Log("StationEditTest: remove C stations=" + stationsAfter + " segments=" + segsAfter +
-            " trains=" + trainsAfterRemove.Length + " refund=" + (refund / 1e8).ToString("F2") + "億円");
+            " trains=" + trainsAfterRemove.Length + " refund=" + (refund / 1e8).ToString("F2") + "億円"
+            + " registryCount=" + TrackNetwork.trains.Count);
         pass &= removeOk;
 
         // --- 撤去後、列車が予約していた駅Aの線が解放されているか(予約漏れ検査) ---

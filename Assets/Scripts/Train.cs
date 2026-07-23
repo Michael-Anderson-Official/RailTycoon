@@ -66,9 +66,6 @@ public class Train : MonoBehaviour
         dwellT = 8f;
     }
 
-    void OnEnable() => TrackNetwork.trains.Add(this);
-    void OnDisable() => TrackNetwork.trains.Remove(this);
-
     // Bootstrap.SimTickから固定tickごとに呼ばれるシミュレーション本体。
     // dtは「シミュレーション秒」(tickSeconds * GameState.timeScale)。
     // 見た目の反映(PlaceCars)はここでは行わず、Bootstrap側が全列車のtick消化後に

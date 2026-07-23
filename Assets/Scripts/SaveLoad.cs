@@ -114,7 +114,11 @@ public static class SaveLoad
             });
         }
 
-        foreach (var t in UnityEngine.Object.FindObjectsByType<Train>(FindObjectsSortMode.None))
+        // FindObjectsByType(None)は列挙順が不定(Unity仕様)なため、TrackNetwork.trains
+        // (生成側が明示的にAdd/Removeする安定した登録順リスト)を使う。これにより
+        // セーブ内の列車順序がセーブ時点のTrackNetwork.trains順と一致し、ロード時の
+        // AddComponent<Train>呼び出し順(→下記の明示Add)もそれに追従する
+        foreach (var t in TrackNetwork.trains)
         {
             if (t.fm == null || t.route == null) continue;
             var r = new List<int>();
@@ -251,6 +255,7 @@ public static class SaveLoad
                 var go = new GameObject("Train_" + fm.Label);
                 go.transform.SetParent(BuildController.WorldRoot, false);
                 var trn = go.AddComponent<Train>();
+                TrackNetwork.trains.Add(trn);
                 trn.Init(fm, route, tracks, startIdx, td.dir);
                 if (td.lineIds != null && td.lineIds.Length > 0) trn.lineIds = new List<int>(td.lineIds);
                 else if (td.lineId >= 0) trn.lineIds = new List<int> { td.lineId }; // 旧セーブ移行
