@@ -45,8 +45,6 @@ public class Train : MonoBehaviour
     readonly List<(Station dest, int count, Vector3 boardPos)> onboard = new List<(Station, int, Vector3)>();
     int onboardCount;
 
-    const float CarGap = 0.7f;
-
     public float HalfTrain => fm.cars * StationLayout.CarLength * 0.5f;
 
     public void Init(TrainCatalog.Formation formation, List<Station> stations, List<int> tracks,
@@ -468,7 +466,7 @@ public class Train : MonoBehaviour
         float carLen = StationLayout.CarLength;
         for (int i = 0; i < cars.Count; i++)
         {
-            float c = s - carLen * 0.5f - i * (carLen + CarGap);
+            float c = s - carLen * 0.5f - i * carLen;
             var (body, bogieF, bogieR) = cars[i];
 
             Vector3 fPos = SampleBogie(path, cum, c + TrainVisual.BogieOffset, out Vector3 fFwd);
