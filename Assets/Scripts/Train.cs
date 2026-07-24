@@ -38,8 +38,25 @@ public class Train : MonoBehaviour
     int departTrack;
     float releaseS;
     bool released;
-    TrackSegment curSeg;      // 走行中の閉塞区間
+    TrackSegment curSeg;      // 走行中の閉塞区間(最終区間。Arrive()が解放)
     Station curSegFrom;
+
+    // 通過駅(スキップストップ)を挟む区間で使う早期解放チェックポイント。
+    // 出発駅の番線(released/releaseS)・最終区間(curSeg、Arrive()が解放)とは別に、
+    // 通過駅の番線と、通過駅より手前の区間(最終区間を除く)を、列車がそこを抜けた
+    // 時点で順に解放する。直結2駅の区間(通過駅なし)では常に空リストのままなので、
+    // 既存の単一区間の挙動・数値には一切影響しない
+    struct TransitCheckpoint
+    {
+        public float atS;
+        public bool isSegment;
+        public TrackSegment seg;
+        public Station segFrom;
+        public Station trackStation;
+        public int track;
+    }
+    List<TransitCheckpoint> transitCheckpoints = new List<TransitCheckpoint>();
+    int nextTransitCheckpoint;
 
     List<(Transform body, Transform bogieF, Transform bogieR)> carTs;
     readonly List<(Station dest, int count, Vector3 boardPos)> onboard = new List<(Station, int, Vector3)>();
@@ -101,6 +118,15 @@ public class Train : MonoBehaviour
         public float releaseS;
         public bool released; // isRunning==trueの場合のみ意味を持つ
         public TrackSegment legSegment; // 上記コメント参照
+        // 通過駅(スキップストップ)を挟む区間の復元用。isRunning==trueの場合のみ意味を持つ。
+        // 空/null(要素数1以下)なら従来通りの直結2駅(通過駅なし)として扱う。
+        // 非空の場合、legSegmentはtransitSegmentsの末尾と必ず一致していること
+        // (呼び出し側で事前に検証済みであること)。弧長(atS)は保存せず、都度この
+        // メソッド内でTryDepart時と同じ計算式から再構築する
+        public List<TrackSegment> transitSegments;   // departStation→routeIds[idx]の全区間(末尾=legSegment)
+        public List<Station> transitStations;        // 通過駅のみ。transitSegments.Count-1個
+        public List<int> transitTracksAtStations;     // 対応する番線。transitStations.Countと同数
+        public int passedCheckpoints;                 // 既に解放済みのチェックポイント数
         public List<(Station dest, int count, Vector3 boardPos)> onboard;
         public int departureCount, arrivalCount;
     }
@@ -134,10 +160,40 @@ public class Train : MonoBehaviour
         {
             var from = spec.departStation;
             var seg = spec.legSegment;
-            int exitSign = seg.SignAt(from);
-            int enterSign = seg.SignAt(to);
-            path = BuildLeg(from, spec.departTrack, exitSign, to, curTrack, enterSign, HalfTrain);
-            cum = RailKit.Cumulative(path);
+            if (spec.transitSegments != null && spec.transitSegments.Count > 1)
+            {
+                // 通過駅を挟む多区間の復元。TryDepart時と同じ組み立て方(BuildMultiLeg+
+                // チェックポイント再計算)で、保存されていた通過駅・番線から再構築する
+                var stations = new List<Station> { from };
+                stations.AddRange(spec.transitStations);
+                stations.Add(to);
+                var segs = spec.transitSegments;
+                var tracks = new int[stations.Count];
+                tracks[0] = spec.departTrack;
+                for (int i = 0; i < spec.transitTracksAtStations.Count; i++) tracks[i + 1] = spec.transitTracksAtStations[i];
+                tracks[tracks.Length - 1] = curTrack;
+
+                var waypoints = new List<(Station st, int track, int enterSign, int exitSign)>(stations.Count);
+                for (int i = 0; i < stations.Count; i++)
+                {
+                    int ex = i < segs.Count ? segs[i].SignAt(stations[i]) : 0;
+                    int en = i > 0 ? segs[i - 1].SignAt(stations[i]) : 0;
+                    waypoints.Add((stations[i], tracks[i], en, ex));
+                }
+                path = BuildMultiLeg(waypoints, HalfTrain);
+                cum = RailKit.Cumulative(path);
+                transitCheckpoints = BuildTransitCheckpoints(stations, segs, tracks, path, cum);
+                nextTransitCheckpoint = Mathf.Clamp(spec.passedCheckpoints, 0, transitCheckpoints.Count);
+            }
+            else
+            {
+                int exitSignSingle = seg.SignAt(from);
+                int enterSignSingle = seg.SignAt(to);
+                path = BuildLeg(from, spec.departTrack, exitSignSingle, to, curTrack, enterSignSingle, HalfTrain);
+                cum = RailKit.Cumulative(path);
+                transitCheckpoints = new List<TransitCheckpoint>();
+                nextTransitCheckpoint = 0;
+            }
             float total = cum[cum.Length - 1];
             s = Mathf.Clamp(spec.s, 0f, total);
             v = Mathf.Max(0f, spec.v);
@@ -146,7 +202,9 @@ public class Train : MonoBehaviour
             released = spec.released;
             releaseS = spec.releaseS;
             curSeg = seg;
-            curSegFrom = from;
+            curSegFrom = spec.transitSegments != null && spec.transitSegments.Count > 1
+                ? spec.transitStations[spec.transitStations.Count - 1]
+                : from;
             state = St.Run;
             dwellT = spec.dwellT;
         }
@@ -221,6 +279,13 @@ public class Train : MonoBehaviour
                 released = true;
                 departStation.Release(departTrack);
             }
+            while (nextTransitCheckpoint < transitCheckpoints.Count && s > transitCheckpoints[nextTransitCheckpoint].atS)
+            {
+                var cp = transitCheckpoints[nextTransitCheckpoint];
+                if (cp.isSegment) cp.seg.Leave(cp.segFrom, this);
+                else cp.trackStation.Release(cp.track);
+                nextTransitCheckpoint++;
+            }
             if (s >= total - 0.05f)
             {
                 s = total;
@@ -248,30 +313,79 @@ public class Train : MonoBehaviour
             }
         }
         var to = route[next];
-        var seg = TrackNetwork.Find(cur, to);
-        if (seg == null) { dwellT = 5f; return; }
-        int exitSign = seg.SignAt(cur);
-        int enterSign = seg.SignAt(to);
-        // 到着駅は指定番線を確保(空くまで発車を待つ)。指定が無ければ左側優先
-        int destTrack;
-        int wantTrack = (routeTracks != null && next < routeTracks.Count) ? routeTracks[next] : -1;
-        if (wantTrack >= 0)
+
+        // 直結でなければ、間に挟まる通過駅を経由するホップ列を探す(種別による停車
+        // パターンの違いは、経路(route)自体には現れず、隣接しない2停車駅の間を
+        // どう繋ぐかというこの発車処理内部の詳細として吸収する)
+        var stations = new List<Station> { cur };
+        var segs = new List<TrackSegment>();
+        var directSeg = TrackNetwork.Find(cur, to);
+        if (directSeg != null)
         {
-            if (!to.TryReserveSpecific(wantTrack)) { dwellT = 2.5f; return; }
-            destTrack = wantTrack;
+            stations.Add(to);
+            segs.Add(directSeg);
         }
-        else if (!to.TryReserveFor(enterSign, out destTrack)) { dwellT = 3f; return; }
-        // 閉塞: 同一方向の駅間に先行列車がいる間は出発できない
-        if (!seg.TryEnter(cur, this))
+        else
         {
-            to.Release(destTrack);
+            var hops = TrackNetwork.FindPath(cur, to);
+            if (hops == null) { dwellT = 5f; return; }
+            foreach (var hop in hops) { stations.Add(hop.station); segs.Add(hop.seg); }
+        }
+
+        int n = stations.Count;
+        var tracks = new int[n];
+        tracks[0] = curTrack;
+        var reservedTracks = new List<(Station st, int track)>();
+        var reservedSegs = new List<(TrackSegment seg, Station from)>();
+        bool ok = true;
+        for (int i = 1; i < n; i++)
+        {
+            var st = stations[i];
+            int enterSign = segs[i - 1].SignAt(st);
+            int track;
+            if (i == n - 1)
+            {
+                // 真の到着駅: 指定番線があればそれ(空くまで発車を待つ)、無ければ左側優先
+                int wantTrack = (routeTracks != null && next < routeTracks.Count) ? routeTracks[next] : -1;
+                if (wantTrack >= 0)
+                {
+                    if (!st.TryReserveSpecific(wantTrack)) { ok = false; break; }
+                    track = wantTrack;
+                }
+                else if (!st.TryReserveFor(enterSign, out track)) { ok = false; break; }
+            }
+            // 通過駅: 他の列車が別の番線に停車中でも使えるよう、空いている番線を動的に探す
+            else if (!st.TryReserveFor(enterSign, out track)) { ok = false; break; }
+            tracks[i] = track;
+            reservedTracks.Add((st, track));
+
+            var seg = segs[i - 1];
+            var fromSt = stations[i - 1];
+            // 閉塞: 同一方向の区間に先行列車がいる間は出発できない
+            if (!seg.TryEnter(fromSt, this)) { ok = false; break; }
+            reservedSegs.Add((seg, fromSt));
+        }
+        if (!ok)
+        {
+            // 経路上のどこか1か所でも確保できなければ、それまでに確保した分を全て
+            // 巻き戻し、既存の失敗時リトライ(数秒後に再試行)へ合流する
+            foreach (var (seg, from) in reservedSegs) seg.Leave(from, this);
+            foreach (var (st, track) in reservedTracks) st.Release(track);
             dwellT = 3f;
             return;
         }
 
         int boarded = Board(cur);
         cur.OnDeparture(boarded);
-        path = BuildLeg(cur, curTrack, exitSign, to, destTrack, enterSign, HalfTrain);
+
+        var waypoints = new List<(Station st, int track, int enterSign, int exitSign)>(n);
+        for (int i = 0; i < n; i++)
+        {
+            int exitSign = i < segs.Count ? segs[i].SignAt(stations[i]) : 0;
+            int enterSign = i > 0 ? segs[i - 1].SignAt(stations[i]) : 0;
+            waypoints.Add((stations[i], tracks[i], enterSign, exitSign));
+        }
+        path = BuildMultiLeg(waypoints, HalfTrain);
         cum = RailKit.Cumulative(path);
         // 経路先頭は列車の尻尾位置。先頭車はそこから編成長ぶん先にいる
         s = HalfTrain * 2f;
@@ -280,12 +394,50 @@ public class Train : MonoBehaviour
         departTrack = curTrack;
         released = false;
         releaseS = cur.HalfLen + StationLayout.ThroatLen + fm.cars * StationLayout.CarLength + 10f;
-        curSeg = seg;
-        curSegFrom = cur;
-        curTrack = destTrack;
+
+        // 通過駅の番線・通過区間(最終区間を除く)は、列車がそこを実際に抜けた時点で
+        // 順に解放する(発車時点で経路全体を一括確保しつつ、他列車がすぐ使えるように
+        // するため)。最終区間はcurSeg/curSegFromとして従来通りArrive()が解放する
+        transitCheckpoints = BuildTransitCheckpoints(stations, segs, tracks, path, cum);
+        nextTransitCheckpoint = 0;
+
+        curSeg = segs[segs.Count - 1];
+        curSegFrom = stations[n - 2];
+        curTrack = tracks[n - 1];
         idx = next;
         state = St.Run;
         DepartureCount++;
+    }
+
+    // stations[1..^2](通過駅)の番線と、それぞれ手前の区間(segs[0..^2])の早期解放
+    // チェックポイントを組む。TryDepart(新規発車)・RestoreState(セーブ復元)の両方から
+    // 同じ計算式で呼ぶ(セーブには弧長を保存せず、都度この駅ジオメトリから再計算する)
+    List<TransitCheckpoint> BuildTransitCheckpoints(List<Station> stations, List<TrackSegment> segs, int[] tracks, List<Vector3> path, float[] cum)
+    {
+        var list = new List<TransitCheckpoint>();
+        int n = stations.Count;
+        for (int i = 1; i < n - 1; i++)
+        {
+            float atS = ArcLengthNear(path, cum, stations[i].TrackWorldPoint(tracks[i], 0))
+                + fm.cars * StationLayout.CarLength + 10f;
+            list.Add(new TransitCheckpoint { atS = atS, isSegment = true, seg = segs[i - 1], segFrom = stations[i - 1] });
+            list.Add(new TransitCheckpoint { atS = atS, isSegment = false, trackStation = stations[i], track = tracks[i] });
+        }
+        return list;
+    }
+
+    // pathの中でworldPosに最も近い点の弧長を返す(通過駅・通過区間の早期解放位置を
+    // 求めるのに使う。厳密な等距離探索ではなく最近傍点ベースだが、早期解放は
+    // 「列車の尾が確実に抜けた後」を狙う安全側の目的なので十分な精度)
+    static float ArcLengthNear(List<Vector3> path, float[] cum, Vector3 worldPos)
+    {
+        int best = 0; float bestD = float.MaxValue;
+        for (int i = 0; i < path.Count; i++)
+        {
+            float d = (path[i] - worldPos).sqrMagnitude;
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return cum[best];
     }
 
     void Arrive()
@@ -358,6 +510,14 @@ public class Train : MonoBehaviour
         if (curSeg != null) { curSeg.Leave(curSegFrom, this); curSeg = null; }
         if (!released && departStation != null) departStation.Release(departTrack);
         released = true;
+        for (int i = nextTransitCheckpoint; i < transitCheckpoints.Count; i++)
+        {
+            var cp = transitCheckpoints[i];
+            if (cp.isSegment) cp.seg.Leave(cp.segFrom, this);
+            else cp.trackStation.Release(cp.track);
+        }
+        transitCheckpoints.Clear();
+        nextTransitCheckpoint = 0;
         if (route != null && idx >= 0 && idx < route.Count) route[idx].Release(curTrack);
     }
 
@@ -368,6 +528,14 @@ public class Train : MonoBehaviour
         if (curSeg != null) { curSeg.Leave(curSegFrom, this); curSeg = null; }
         if (!released && departStation != null) departStation.Release(departTrack);
         released = true;
+        for (int i = nextTransitCheckpoint; i < transitCheckpoints.Count; i++)
+        {
+            var cp = transitCheckpoints[i];
+            if (cp.isSegment) cp.seg.Leave(cp.segFrom, this);
+            else cp.trackStation.Release(cp.track);
+        }
+        transitCheckpoints.Clear();
+        nextTransitCheckpoint = 0;
 
         idx = Mathf.Clamp(idx, 0, route.Count - 1);
         for (int i = 0; i < route.Count; i++)
@@ -430,6 +598,23 @@ public class Train : MonoBehaviour
     public float ReleaseS => releaseS;
     public TrackSegment CurSeg => curSeg; // Run中のみ非null
     public IReadOnlyList<(Station dest, int count, Vector3 boardPos)> Onboard => onboard;
+
+    // 通過駅(スキップストップ)を挟む区間のセーブ用。直結2駅の単一区間ならsegmentIdsは
+    // CurSeg 1件のみ・station/tracksは空になる(従来通りの単一区間として保存される)
+    public void GetTransitChainForSave(out List<int> segmentIds, out List<int> stationIds, out List<int> tracks, out int passed)
+    {
+        segmentIds = new List<int>();
+        stationIds = new List<int>();
+        tracks = new List<int>();
+        for (int i = 0; i < transitCheckpoints.Count; i += 2)
+        {
+            segmentIds.Add(transitCheckpoints[i].seg.id);
+            stationIds.Add(transitCheckpoints[i + 1].trackStation.id);
+            tracks.Add(transitCheckpoints[i + 1].track);
+        }
+        if (curSeg != null) segmentIds.Add(curSeg.id);
+        passed = nextTransitCheckpoint;
+    }
 
     // 前面展望カメラ用: 先頭車前端の位置と進行方向
     public void CabPose(out Vector3 pos, out Vector3 fwd)
@@ -498,19 +683,45 @@ public class Train : MonoBehaviour
     // 必要がある、という判定に使うしきい値
     const float CrossoverMismatch = 0.1f;
 
-    // 駅fromの線fromTrackから駅toの線toTrackまでの走行経路を組む。
-    // 収束(収束点、駅の自線側±2.3)と、駅間区間で使う本線側(常に左側通行)のオフセットが
-    // 一致しない場合(=停車線が進行方向の反対側だった場合)、リード区間の途中
-    // (Station.RebuildTrackVisualが両渡り線を描く位置と同じz)で乗り換える点を挟み、
-    // 実際に描かれた渡り線の上を通るようにする
-    public static List<Vector3> BuildLeg(Station from, int fromTrack, int exitSign,
-        Station to, int toTrack, int enterSign, float halfTrain)
+    // 駅stを出て(またはそこへ入って)signの向きの区間へ抜けるまでの点列を作る部品。
+    // BuildLeg/BuildMultiLegから共通で使う(通過駅では停止位置マーカー(タップ余白)を
+    // 省き、ホーム中心のみで繋ぐ)。mainOffsetは接続先(駅間カーブ)の端点をst基準の
+    // ローカルxへ直したもの(このstから見た本線側オフセット)
+    static List<Vector3> StationDeparture(Station st, int track, int sign, float mainOffset, float halfTrain, bool includeTailMarker)
     {
         var pts = new List<Vector3>();
-        float hf = from.HalfLen, tf = StationLayout.ThroatLen, L = StationLayout.LeadLen;
-        float offF = from.layout.trackOffsets[fromTrack];
-        float convF = Mathf.Sign(offF) * 2.3f;
+        float h = st.HalfLen, tf = StationLayout.ThroatLen, L = StationLayout.LeadLen;
+        float conv = Mathf.Sign(st.layout.trackOffsets[track]) * 2.3f;
+        if (includeTailMarker) pts.Add(st.TrackWorldPoint(track, -sign * halfTrain));
+        pts.Add(st.TrackWorldPoint(track, 0));
+        pts.Add(st.TrackWorldPoint(track, sign * h));                                              // ホーム端
+        pts.Add(st.transform.TransformPoint(new Vector3(conv, 0, sign * (h + tf - L))));           // 収束(自線側±2.3)
+        if (Mathf.Abs(mainOffset - conv) > CrossoverMismatch)
+            pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf - L * 0.5f)))); // 両渡り線で本線側へ
+        pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf))));         // 駅端(リード端、本線側)
+        return pts;
+    }
 
+    static List<Vector3> StationArrival(Station st, int track, int sign, float mainOffset, float halfTrain, bool includeTailMarker)
+    {
+        var pts = new List<Vector3>();
+        float h = st.HalfLen, tf = StationLayout.ThroatLen, L = StationLayout.LeadLen;
+        float conv = Mathf.Sign(st.layout.trackOffsets[track]) * 2.3f;
+        pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf))));         // 駅端(リード端、本線側)
+        if (Mathf.Abs(mainOffset - conv) > CrossoverMismatch)
+            pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf - L * 0.5f)))); // 両渡り線で自線側へ
+        pts.Add(st.transform.TransformPoint(new Vector3(conv, 0, sign * (h + tf - L))));           // 収束(自線側±2.3)
+        pts.Add(st.TrackWorldPoint(track, sign * h));                                              // ホーム端
+        pts.Add(st.TrackWorldPoint(track, 0));
+        if (includeTailMarker) pts.Add(st.TrackWorldPoint(track, -sign * halfTrain));
+        return pts;
+    }
+
+    // 駅from(exitSign方向へ出る)〜駅to(enterSign方向から入る)を結ぶ曲線。
+    // mainF/mainTは、それぞれfrom/to自身のローカル座標系で見た曲線端点のオフセット
+    // (StationDeparture/StationArrivalの本線側オフセットにそのまま渡す)
+    static List<Vector3> CurveBetween(Station from, int exitSign, Station to, int enterSign, out float mainF, out float mainT)
+    {
         var endA = from.End(exitSign);
         var endB = to.End(enterSign);
         // 駅間は直線ではなく、両駅それぞれの発着方向(Axis*sign)へ、実際の鉄道のように
@@ -523,30 +734,41 @@ public class Train : MonoBehaviour
         // 左側通行(実際のレールと同じ規約)。端点は近似接線でなくtan0/tan1そのものを使い、
         // 駅の自前スロートのレールと厳密に一致させる(列車がレールから見えて外れないため)
         var curveOffset = RailKit.OffsetWithEndTangents(curve, 2.3f, tan0, tan1);
-        // 駅間区間の始点(curveOffset[0])を出発駅のローカル座標に戻し、本線側のオフセットを得る
-        float mainF = from.transform.InverseTransformPoint(curveOffset[0]).x;
+        mainF = from.transform.InverseTransformPoint(curveOffset[0]).x;
+        mainT = to.transform.InverseTransformPoint(curveOffset[curveOffset.Count - 1]).x;
+        return curveOffset;
+    }
 
-        pts.Add(from.TrackWorldPoint(fromTrack, -exitSign * halfTrain));
-        pts.Add(from.TrackWorldPoint(fromTrack, 0));
-        pts.Add(from.TrackWorldPoint(fromTrack, exitSign * hf));                                     // ホーム端
-        pts.Add(from.transform.TransformPoint(new Vector3(convF, 0, exitSign * (hf + tf - L))));     // 収束(自線側±2.3)
-        if (Mathf.Abs(mainF - convF) > CrossoverMismatch)
-            pts.Add(from.transform.TransformPoint(new Vector3(mainF, 0, exitSign * (hf + tf - L * 0.5f)))); // 両渡り線で本線側へ
-        pts.Add(from.transform.TransformPoint(new Vector3(mainF, 0, exitSign * (hf + tf))));         // 駅端(リード端、本線側)
+    // 駅fromの線fromTrackから駅toの線toTrackまでの走行経路を組む(直結2駅専用)。
+    // 内部的にはBuildMultiLegの2駅版(通過駅なし)と同じ
+    public static List<Vector3> BuildLeg(Station from, int fromTrack, int exitSign,
+        Station to, int toTrack, int enterSign, float halfTrain)
+        => BuildMultiLeg(new List<(Station st, int track, int enterSign, int exitSign)>
+        {
+            (from, fromTrack, 0, exitSign),
+            (to, toTrack, enterSign, 0),
+        }, halfTrain);
 
-        pts.AddRange(curveOffset);
-
-        float ht = to.HalfLen;
-        float offT = to.layout.trackOffsets[toTrack];
-        float convT = Mathf.Sign(offT) * 2.3f;
-        float mainT = to.transform.InverseTransformPoint(curveOffset[curveOffset.Count - 1]).x;
-        pts.Add(to.transform.TransformPoint(new Vector3(mainT, 0, enterSign * (ht + tf))));          // 駅端(リード端、本線側)
-        if (Mathf.Abs(mainT - convT) > CrossoverMismatch)
-            pts.Add(to.transform.TransformPoint(new Vector3(mainT, 0, enterSign * (ht + tf - L * 0.5f)))); // 両渡り線で自線側へ
-        pts.Add(to.transform.TransformPoint(new Vector3(convT, 0, enterSign * (ht + tf - L))));       // 収束(自線側±2.3)
-        pts.Add(to.TrackWorldPoint(toTrack, enterSign * ht));
-        pts.Add(to.TrackWorldPoint(toTrack, 0));
-        pts.Add(to.TrackWorldPoint(toTrack, -enterSign * halfTrain));
+    // 通過駅を挟んだ複数区間を1本の走行経路として繋ぐ。waypoints[0]=真の出発駅、
+    // waypoints[^1]=真の到着駅、間は全て通過駅(そのenterSign/exitSignの両方を使う)。
+    // 停止位置マーカー(halfTrain分の余白)は先頭・末尾の駅にだけ付け、通過駅では
+    // ホーム中心のみで発着を繋ぐ(素朴にBuildLegを複数連結すると、通過駅ごとに
+    // 前後halfTrainぶん行って戻る不自然な折り返しが混入するため)
+    public static List<Vector3> BuildMultiLeg(List<(Station st, int track, int enterSign, int exitSign)> waypoints, float halfTrain)
+    {
+        var pts = new List<Vector3>();
+        int n = waypoints.Count;
+        for (int i = 0; i + 1 < n; i++)
+        {
+            var wa = waypoints[i];
+            var wb = waypoints[i + 1];
+            var curve = CurveBetween(wa.st, wa.exitSign, wb.st, wb.enterSign, out float mainF, out float mainT);
+            bool isTrueOrigin = i == 0;
+            bool isTrueDestination = i + 2 == n;
+            pts.AddRange(StationDeparture(wa.st, wa.track, wa.exitSign, mainF, halfTrain, isTrueOrigin));
+            pts.AddRange(curve);
+            pts.AddRange(StationArrival(wb.st, wb.track, wb.enterSign, mainT, halfTrain, isTrueDestination));
+        }
         return RailKit.Chaikin(pts, 2);
     }
 }

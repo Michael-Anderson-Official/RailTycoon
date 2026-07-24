@@ -24,6 +24,8 @@ public class UIController : MonoBehaviour
     // 列車パネル(タブ制): 系統をつくる / 列車を配置
     GameObject serviceTab, dispatchView, lineListView, createView;
     RectTransform lineListRows, dispatchLineRows, itineraryRows;
+    InputField stationSearchInput;
+    RectTransform stationSearchRows;
     Image tabServiceBtn, tabDispatchBtn;
     Image[] typeBtns;
     readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
@@ -289,12 +291,58 @@ public class UIController : MonoBehaviour
                 new Vector2(i * w + 0.01f, 1), new Vector2((i + 1) * w - 0.01f, 1),
                 new Vector2(0, -92), new Vector2(0, -40), () => BC.SetNewLineType(ti));
         }
-        var prRt = Rect("PlatformRow", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -152), new Vector2(0, -100));
+        // 駅検索(マップをタップする代わりに駅名で経路に追加する)。結果行のタップは
+        // マップの駅タップと全く同じBC.TapRouteStation(重複チェック・接続チェック・
+        // 番線ピッカー表示)へ合流する
+        Label("StSearchLbl", createView.transform, "駅を検索して経路に追加", 19, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -124), new Vector2(-2, -98), TextAnchor.MiddleLeft);
+        var searchBoxImg = Panel("StSearchBox", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -172), new Vector2(0, -130), new Color(0.96f, 0.97f, 0.99f, 1f));
+        stationSearchInput = searchBoxImg.gameObject.AddComponent<InputField>();
+        var searchTxt = Label("StSearchTxt", searchBoxImg.transform, "", 22, Vector2.zero, Vector2.one, new Vector2(12, 2), new Vector2(-12, -2), TextAnchor.MiddleLeft);
+        searchTxt.color = new Color(0.1f, 0.1f, 0.13f);
+        searchTxt.supportRichText = false;
+        var searchPh = Label("StSearchPh", searchBoxImg.transform, "駅名を入力", 22, Vector2.zero, Vector2.one, new Vector2(12, 2), new Vector2(-12, -2), TextAnchor.MiddleLeft);
+        searchPh.color = new Color(0.45f, 0.45f, 0.5f);
+        stationSearchInput.textComponent = searchTxt;
+        stationSearchInput.placeholder = searchPh;
+        stationSearchInput.targetGraphic = searchBoxImg;
+        stationSearchInput.characterLimit = 24;
+        stationSearchInput.lineType = InputField.LineType.SingleLine;
+        stationSearchInput.onValueChanged.AddListener(OnStationSearchChanged);
+        stationSearchRows = Rect("StSearchRows", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -338), new Vector2(0, -178));
+
+        var prRt = Rect("PlatformRow", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -396), new Vector2(0, -344));
         platformRow = prRt.gameObject;
         platformRow.SetActive(false);
-        routeText = Label("Route", createView.transform, "", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -280), new Vector2(-2, -160), TextAnchor.UpperLeft);
-        Btn("SaveLine", createView.transform, "系統を保存", 26, new Vector2(0, 1), new Vector2(0.6f, 1), new Vector2(0, -344), new Vector2(-3, -290), () => BC.SaveNewLine(), BtnActive);
-        Btn("CancelLine", createView.transform, "やめる", 24, new Vector2(0.62f, 1), new Vector2(1, 1), new Vector2(3, -344), new Vector2(0, -290), () => BC.CancelCreateLine());
+        routeText = Label("Route", createView.transform, "", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -522), new Vector2(-2, -402), TextAnchor.UpperLeft);
+        Btn("SaveLine", createView.transform, "系統を保存", 26, new Vector2(0, 1), new Vector2(0.6f, 1), new Vector2(0, -582), new Vector2(-3, -528), () => BC.SaveNewLine(), BtnActive);
+        Btn("CancelLine", createView.transform, "やめる", 24, new Vector2(0.62f, 1), new Vector2(1, 1), new Vector2(3, -582), new Vector2(0, -528), () => BC.CancelCreateLine());
+    }
+
+    // 駅検索欄の入力に応じて、駅名が部分一致する駅を結果行として並べる。
+    // 空欄では何も出さない(路線数が多いと全駅列挙が埋もれるため)
+    void OnStationSearchChanged(string query)
+    {
+        if (stationSearchRows == null) return;
+        for (int i = stationSearchRows.childCount - 1; i >= 0; i--) Destroy(stationSearchRows.GetChild(i).gameObject);
+        if (string.IsNullOrEmpty(query)) return;
+        float y = -2;
+        foreach (var st in TrackNetwork.stations)
+        {
+            if (st.id == 0 || st.preview) continue;
+            if (st.stationName.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
+            var s = st;
+            Btn("SS" + s.id, stationSearchRows, s.stationName, 19, new Vector2(0, 1), new Vector2(1, 1),
+                new Vector2(0, y - 40), new Vector2(0, y), () => BC.TapRouteStation(s));
+            y -= 44;
+        }
+    }
+
+    // 系統作成の中断・番線選択のやり直し等で、検索欄と結果行を空に戻す
+    public void ClearStationSearch()
+    {
+        if (stationSearchInput != null) stationSearchInput.text = "";
+        if (stationSearchRows != null)
+            for (int i = stationSearchRows.childCount - 1; i >= 0; i--) Destroy(stationSearchRows.GetChild(i).gameObject);
     }
 
     void BuildDispatchView(Transform parent)

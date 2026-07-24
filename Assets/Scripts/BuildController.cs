@@ -376,8 +376,8 @@ public class BuildController : MonoBehaviour
 
     // ---- 列車 ----
 
-    // 系統作成中に停車駅をタップ。番線選択待ちにする
-    void TapRouteStation(Station st)
+    // 系統作成中に停車駅をタップ(またはUIの駅検索結果をタップ)。番線選択待ちにする
+    public void TapRouteStation(Station st)
     {
         if (routeSel.Count > 0)
         {
@@ -388,9 +388,11 @@ public class BuildController : MonoBehaviour
                 UIController.Toast("すでに経路に含まれています");
                 return;
             }
-            if (!TrackNetwork.Connected(last, st))
+            // 直結でなくても、線路で繋がっていれば経路に追加できる(間の駅は通過駅になる。
+            // 実際の経由駅列はTrain.TryDepart側で改めて同じFindPathを呼んで求める)
+            if (!TrackNetwork.Connected(last, st) && TrackNetwork.FindPath(last, st) == null)
             {
-                UIController.Toast(last.stationName + "と直結する線路がありません");
+                UIController.Toast(last.stationName + "から線路でつながっていません");
                 return;
             }
         }
@@ -597,6 +599,7 @@ public class BuildController : MonoBehaviour
         {
             UIController.I.HidePlatformPicker();
             UIController.I.UpdateRouteLabel();
+            UIController.I.ClearStationSearch();
         }
     }
 

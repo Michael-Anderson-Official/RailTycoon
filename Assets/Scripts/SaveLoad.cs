@@ -199,10 +199,64 @@ public static class SaveLoad
         public LnDataV2[] ln;
     }
 
+    // ==================== v4 (通過駅(スキップストップ)を挟む多区間走行) ====================
+    // station/segment/lineのスキーマ自体はv3から変更が無いため、StDataV3/SegDataV2/
+    // LnDataV2をそのまま再利用する。TrDataV2に、通過駅を挟む区間(直結2駅の単一区間
+    // ではないRun状態)の復元に必要なフィールドだけを追加したTrDataV3を新設する
+
+    [Serializable]
+    public class TrDataV3
+    {
+        public int id;                  // 0=不正値
+        public string typeId;
+        public int cars;
+        public int[] routeIds;          // stable id列
+        public int[] tracks;
+        public int[] lineIds;
+        public int idx = -1;            // -1=欠落/不正
+        public int dir;                 // +1/-1のみ有効
+        public int curTrack = -1;       // -1=欠落/不正
+        public bool cyclic;
+        public int state = -1;          // -1=欠落/不正, 0=Dwell, 1=Run
+        public int dwellPathKind = -1;  // Run時は無視。Dwell時のみ0=StationLocal,1=JustArrivedLeg
+        public float dwellT, s, v;
+        public int departStationId;     // 0=無し(Dwell/StationLocal)
+        public int departTrack;
+        public float releaseS;
+        public bool released;
+        public int legSegmentId;        // 0=無し(Dwell/StationLocal)。Run+多区間ならtransitSegmentIdsの末尾と同じ
+        public OnboardGroupV2[] onboard;
+        public int departureCount, arrivalCount;
+        // 通過駅(スキップストップ)を挟む区間の情報。null/長さ1以下 = 従来通り直結2駅の
+        // 単一区間(通過駅なし)。非空の場合、末尾は必ずlegSegmentIdと一致する。
+        // 弧長(早期解放チェックポイントの位置)は保存せず、ロード時に駅ジオメトリから
+        // 都度再計算する(Train.RestoreState参照)
+        public int[] transitSegmentIds;   // departStationからroute[idx]までの全区間(末尾=legSegmentId)
+        public int[] transitStationIds;   // 通過駅のみ。transitSegmentIds.Length-1個
+        public int[] transitTracks;       // 対応する番線。transitStationIdsと同数
+        public int passedCheckpoints;     // 既に解放済みのチェックポイント数(0=未消化)
+    }
+
+    [Serializable]
+    public class GameDataV4
+    {
+        public int v = 4;
+        public double money;
+        public long carried;
+        public float minutes, speed;
+        public uint randomState;
+        public int nameCounter;
+        public int stationIdCounter, segmentIdCounter, trainIdCounter, lineIdCounter;
+        public StDataV3[] st;
+        public SegDataV2[] seg;
+        public TrDataV3[] tr;
+        public LnDataV2[] ln;
+    }
+
     public static void Save()
     {
         if (suppress) return;
-        var d = new GameDataV3
+        var d = new GameDataV4
         {
             money = GameState.money,
             carried = GameState.carried,
@@ -275,7 +329,7 @@ public static class SaveLoad
         }
         d.ln = lnList.ToArray();
 
-        var trList = new List<TrDataV2>();
+        var trList = new List<TrDataV3>();
         foreach (var t in TrackNetwork.trains)
         {
             if (t.id == 0 || t.fm == null || t.route == null) continue;
@@ -288,7 +342,7 @@ public static class SaveLoad
             }
             if (!ok || r.Count < 2) continue;
 
-            var td = new TrDataV2
+            var td = new TrDataV3
             {
                 id = t.id,
                 typeId = t.fm.type.id,
@@ -316,6 +370,14 @@ public static class SaveLoad
                 td.state = 1;
                 td.dwellPathKind = -1;
                 td.legSegmentId = t.CurSeg != null ? t.CurSeg.id : 0;
+                // 通過駅(スキップストップ)を挟む区間なら、経路全体のセグメント列・通過駅・
+                // 番線・解放済みチェックポイント数を保存する(直結2駅の単一区間なら
+                // segmentIdsはlegSegmentId 1件のみ・station/tracksは空になる)
+                t.GetTransitChainForSave(out var segIds, out var stIds, out var trkIds, out var passed);
+                td.transitSegmentIds = segIds.ToArray();
+                td.transitStationIds = stIds.ToArray();
+                td.transitTracks = trkIds.ToArray();
+                td.passedCheckpoints = passed;
             }
             else
             {
@@ -384,7 +446,7 @@ public static class SaveLoad
         catch (Exception e) { Debug.LogError("SaveLoad: version probe failed: " + e.Message); return false; }
         if (probe == null) return false;
 
-        GameDataV3 v3;
+        GameDataV4 v4;
         bool migrated;
         if (probe.v == 1)
         {
@@ -392,7 +454,7 @@ public static class SaveLoad
             try { v1 = JsonUtility.FromJson<GameData>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v1 parse failed: " + e.Message); return false; }
             if (v1 == null || v1.st == null || v1.st.Count == 0) return false;
-            v3 = MigrateV2ToV3(MigrateV1ToV2(v1));
+            v4 = MigrateV3ToV4(MigrateV2ToV3(MigrateV1ToV2(v1)));
             migrated = true;
         }
         else if (probe.v == 2)
@@ -401,13 +463,22 @@ public static class SaveLoad
             try { v2 = JsonUtility.FromJson<GameDataV2>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v2 parse failed: " + e.Message); return false; }
             if (v2 == null || v2.st == null || v2.st.Length == 0) return false;
-            v3 = MigrateV2ToV3(v2);
+            v4 = MigrateV3ToV4(MigrateV2ToV3(v2));
             migrated = true;
         }
         else if (probe.v == 3)
         {
+            GameDataV3 v3;
             try { v3 = JsonUtility.FromJson<GameDataV3>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v3 parse failed: " + e.Message); return false; }
+            if (v3 == null || v3.st == null || v3.st.Length == 0) return false;
+            v4 = MigrateV3ToV4(v3);
+            migrated = true;
+        }
+        else if (probe.v == 4)
+        {
+            try { v4 = JsonUtility.FromJson<GameDataV4>(json); }
+            catch (Exception e) { Debug.LogError("SaveLoad: v4 parse failed: " + e.Message); return false; }
             migrated = false;
         }
         else
@@ -415,22 +486,57 @@ public static class SaveLoad
             Debug.LogError("SaveLoad: unsupported version " + probe.v + " (0=欠落, 未来versionは非対応)");
             return false;
         }
-        if (v3 == null || v3.st == null || v3.st.Length == 0) return false;
+        if (v4 == null || v4.st == null || v4.st.Length == 0) return false;
 
         string error;
-        if (!Validate(v3, out error))
+        if (!Validate(v4, out error))
         {
             Debug.LogError("SaveLoad: validation failed: " + error);
             return false;
         }
 
-        if (!ApplyToWorld(v3, out error))
+        if (!ApplyToWorld(v4, out error))
         {
             Debug.LogError("SaveLoad: apply failed: " + error);
             return false;
         }
-        if (migrated) Debug.Log("SaveLoad: 旧セーブをv3へ正規化して読み込みました(次回保存時にv3として書き戻ります)");
+        if (migrated) Debug.Log("SaveLoad: 旧セーブをv4へ正規化して読み込みました(次回保存時にv4として書き戻ります)");
         return true;
+    }
+
+    // v3(通過駅を挟む多区間の概念が存在しない)をv4形式へ正規化する。全てのRun列車は
+    // 直結2駅の単一区間として扱う(transitSegmentIds等は空のまま)。既存挙動と完全に
+    // 一致する(v3セーブの時点でそもそも通過駅を挟む区間は存在し得なかったため)
+    static GameDataV4 MigrateV3ToV4(GameDataV3 v3)
+    {
+        var d = new GameDataV4
+        {
+            money = v3.money, carried = v3.carried, minutes = v3.minutes, speed = v3.speed,
+            randomState = v3.randomState, nameCounter = v3.nameCounter,
+            stationIdCounter = v3.stationIdCounter, segmentIdCounter = v3.segmentIdCounter,
+            trainIdCounter = v3.trainIdCounter, lineIdCounter = v3.lineIdCounter,
+            st = v3.st, seg = v3.seg, ln = v3.ln,
+        };
+        var srcTr = v3.tr ?? new TrDataV2[0]; // 欠落(null)はtrなしとして扱う(Validate側と同じ規約)
+        var trList = new TrDataV3[srcTr.Length];
+        for (int i = 0; i < srcTr.Length; i++)
+        {
+            var t = srcTr[i];
+            trList[i] = new TrDataV3
+            {
+                id = t.id, typeId = t.typeId, cars = t.cars,
+                routeIds = t.routeIds, tracks = t.tracks, lineIds = t.lineIds,
+                idx = t.idx, dir = t.dir, curTrack = t.curTrack, cyclic = t.cyclic,
+                state = t.state, dwellPathKind = t.dwellPathKind,
+                dwellT = t.dwellT, s = t.s, v = t.v,
+                departStationId = t.departStationId, departTrack = t.departTrack,
+                releaseS = t.releaseS, released = t.released, legSegmentId = t.legSegmentId,
+                onboard = t.onboard, departureCount = t.departureCount, arrivalCount = t.arrivalCount,
+                transitSegmentIds = null, transitStationIds = null, transitTracks = null, passedCheckpoints = 0,
+            };
+        }
+        d.tr = trList;
+        return d;
     }
 
     // v2(ホーム縁の乗降モードが存在しない)をv3形式へ正規化する。全てのホーム縁は
@@ -472,6 +578,29 @@ public static class SaveLoad
     {
         foreach (var g in segs)
             if ((g.aId == aId && g.bId == bId) || (g.aId == bId && g.bId == aId)) return true;
+        return false;
+    }
+
+    // 通過駅(スキップストップ)対応: aIdからbIdへ、直結でなくても線路を辿って到達できるか。
+    // Train.TryDepart/TrackNetwork.FindPathと同じBFSだが、ロード検証時点ではまだ生きた
+    // TrackNetworkが存在しないため、セーブデータ自身のseg配列だけで完結させる
+    static bool RoutePathExists(SegDataV2[] segs, int aId, int bId)
+    {
+        if (aId == bId) return true;
+        var seen = new HashSet<int> { aId };
+        var q = new Queue<int>();
+        q.Enqueue(aId);
+        while (q.Count > 0)
+        {
+            int cur = q.Dequeue();
+            foreach (var g in segs)
+            {
+                int other = g.aId == cur ? g.bId : (g.bId == cur ? g.aId : -1);
+                if (other == -1) continue;
+                if (other == bId) return true;
+                if (seen.Add(other)) q.Enqueue(other);
+            }
+        }
         return false;
     }
 
@@ -627,7 +756,7 @@ public static class SaveLoad
 
     // 参照整合性・値域・重複ID・重複予約claimを、GameObjectを一切生成せずに検証する。
     // ここを通過すれば ApplyToWorld は原則として失敗しない
-    static bool Validate(GameDataV3 d, out string error)
+    static bool Validate(GameDataV4 d, out string error)
     {
         error = null;
         // JsonUtilityはJSONに存在しない配列フィールドをnullのまま残す(空配列にはならない)。
@@ -635,7 +764,7 @@ public static class SaveLoad
         if (d.st == null) d.st = new StDataV3[0];
         if (d.seg == null) d.seg = new SegDataV2[0];
         if (d.ln == null) d.ln = new LnDataV2[0];
-        if (d.tr == null) d.tr = new TrDataV2[0];
+        if (d.tr == null) d.tr = new TrDataV3[0];
         if (double.IsNaN(d.money) || double.IsInfinity(d.money)) { error = "money不正"; return false; }
         if (float.IsNaN(d.minutes) || float.IsInfinity(d.minutes)) { error = "minutes不正"; return false; }
         // speedを未検証のままにすると、欠落(=0)時にApply側の「0以下なら維持」という
@@ -733,13 +862,14 @@ public static class SaveLoad
         if (d.segmentIdCounter < maxSegId) { error = "segmentIdCounterが既存最大IDより小さい"; return false; }
 
         var lineIds = new HashSet<int>();
-        // 経路上の隣接駅が実際に線路で結ばれているか(結ばれていない経路を持つ
-        // 列車はロード成功後、TryDepart()が閉塞を見つけられず永久に発車できなくなる。
-        // 実装後レビューでCodex CLIが指摘)
+        // 経路上の隣接する停車駅同士が、直結でなくても線路を辿って到達できるか
+        // (到達できない経路を持つ列車はロード成功後、TryDepart()が経路を見つけられず
+        // 永久に発車できなくなる。実装後レビューでCodex CLIが指摘。M2-Eで通過駅
+        // (スキップストップ)対応により、直結必須からRoutePathExists(到達可能)へ緩和)
         bool RouteAdjacent(int[] routeIds)
         {
             for (int i = 0; i + 1 < routeIds.Length; i++)
-                if (!SegmentConnects(d.seg, routeIds[i], routeIds[i + 1])) return false;
+                if (!RoutePathExists(d.seg, routeIds[i], routeIds[i + 1])) return false;
             return true;
         }
 
@@ -784,11 +914,11 @@ public static class SaveLoad
             foreach (var sid in td.routeIds)
                 if (!stationIds.Contains(sid)) { error = "trainが不明な駅を参照: " + td.id; return false; }
             if (!RouteAdjacent(td.routeIds)) { error = "trainの経路上の隣接駅が線路で結ばれていない: " + td.id; return false; }
-            // cyclic=trueの場合、TryDepart()は末尾到達時に先頭駅への閉塞を探す
-            // (Train.cs内のcyclic分岐)。末尾-先頭間が未接続だと永久に発車できなくなる
-            // (実装後レビューでCodex CLIが指摘)
-            if (td.cyclic && !SegmentConnects(d.seg, td.routeIds[td.routeIds.Length - 1], td.routeIds[0]))
-            { error = "trainがcyclic=trueだが経路の末尾-先頭が線路で結ばれていない: " + td.id; return false; }
+            // cyclic=trueの場合、TryDepart()は末尾到達時に先頭駅への経路を探す
+            // (Train.cs内のcyclic分岐、通過駅を挟んでもよい)。末尾-先頭間が到達不能だと
+            // 永久に発車できなくなる(実装後レビューでCodex CLIが指摘)
+            if (td.cyclic && !RoutePathExists(d.seg, td.routeIds[td.routeIds.Length - 1], td.routeIds[0]))
+            { error = "trainがcyclic=trueだが経路の末尾-先頭が線路で到達できない: " + td.id; return false; }
             if (td.idx < 0 || td.idx >= td.routeIds.Length) { error = "train idx範囲外: " + td.id; return false; }
             if (td.dir != 1 && td.dir != -1) { error = "train dir不正: " + td.id; return false; }
             if (float.IsNaN(td.s) || float.IsInfinity(td.s) || td.s < 0) { error = "train sが不正(負値/NaN): " + td.id; return false; }
@@ -827,8 +957,52 @@ public static class SaveLoad
                 { error = "Run列車のlegSegmentが不明: " + td.id; return false; }
                 if (td.departStationId == 0 || !stationIds.Contains(td.departStationId))
                 { error = "Run列車のdepartStationが不明: " + td.id; return false; }
-                bool legConnectsProperly = (seg.aId == td.departStationId && seg.bId == destStationId)
-                    || (seg.bId == td.departStationId && seg.aId == destStationId);
+
+                // 通過駅(スキップストップ)を挟む多区間かどうか。null/長さ1以下なら
+                // 従来通り直結2駅の単一区間(legSegmentは発車駅から直接到着駅へ繋がる)
+                bool hasTransit = td.transitSegmentIds != null && td.transitSegmentIds.Length > 1;
+                int finalSegFromId; // legSegment(=末尾の区間)が実際にどの駅から入るか
+                if (hasTransit)
+                {
+                    int m = td.transitSegmentIds.Length;
+                    if (td.transitStationIds == null || td.transitStationIds.Length != m - 1)
+                    { error = "transitStationIds長が不正: " + td.id; return false; }
+                    if (td.transitTracks == null || td.transitTracks.Length != m - 1)
+                    { error = "transitTracks長が不正: " + td.id; return false; }
+                    if (td.transitSegmentIds[m - 1] != td.legSegmentId)
+                    { error = "transitSegmentIdsの末尾がlegSegmentIdと不一致: " + td.id; return false; }
+                    if (td.passedCheckpoints < 0 || td.passedCheckpoints > (m - 1) * 2)
+                    { error = "passedCheckpointsが範囲外: " + td.id; return false; }
+
+                    // チェーンが実際にdepartStation→到着駅を連続して繋いでいるか、
+                    // 各通過駅・番線の妥当性を1ホップずつ検証する
+                    int prevId = td.departStationId;
+                    for (int i = 0; i < m; i++)
+                    {
+                        if (!segById.TryGetValue(td.transitSegmentIds[i], out var hopSeg))
+                        { error = "transitSegmentが不明: " + td.id + " at " + i; return false; }
+                        int otherEnd = hopSeg.aId == prevId ? hopSeg.bId : (hopSeg.bId == prevId ? hopSeg.aId : -1);
+                        if (otherEnd == -1) { error = "transitSegmentsが連続していない: " + td.id + " at " + i; return false; }
+                        int expected = i < m - 1 ? td.transitStationIds[i] : destStationId;
+                        if (otherEnd != expected) { error = "transitSegmentsの経由駅が不一致: " + td.id + " at " + i; return false; }
+                        if (i < m - 1)
+                        {
+                            if (!stationIds.Contains(td.transitStationIds[i])) { error = "transitStationが不明: " + td.id; return false; }
+                            if (!TrackValid(td.transitTracks[i], td.transitStationIds[i])) { error = "transitTrackが不正: " + td.id; return false; }
+                        }
+                        prevId = expected;
+                    }
+                    finalSegFromId = td.transitStationIds[m - 2];
+                }
+                else
+                {
+                    if (td.transitStationIds != null && td.transitStationIds.Length > 0)
+                    { error = "transitStationIdsがあるのにtransitSegmentIdsが不正: " + td.id; return false; }
+                    finalSegFromId = td.departStationId;
+                }
+
+                bool legConnectsProperly = (seg.aId == finalSegFromId && seg.bId == destStationId)
+                    || (seg.bId == finalSegFromId && seg.aId == destStationId);
                 if (!legConnectsProperly)
                 { error = "Run列車のlegSegmentが発着駅を結んでいない: " + td.id; return false; }
                 if (!CurrentTrackValid(td.departTrack, td.departStationId))
@@ -837,14 +1011,38 @@ public static class SaveLoad
                 // 到着駅の番線は常に確保済み(TryDepart時点で確保してから発車するため)
                 long platKey = ((long)destStationId << 32) | (uint)td.curTrack;
                 if (!platformClaims.Add(platKey)) { error = "到着番線の二重予約: station " + destStationId + " track " + td.curTrack; return false; }
-                long blockKey = ((long)td.legSegmentId << 32) | (uint)td.departStationId;
-                if (!blockClaims.Add(blockKey)) { error = "閉塞の二重予約: segment " + td.legSegmentId + " from " + td.departStationId; return false; }
+                long blockKey = ((long)td.legSegmentId << 32) | (uint)finalSegFromId;
+                if (!blockClaims.Add(blockKey)) { error = "閉塞の二重予約: segment " + td.legSegmentId + " from " + finalSegFromId; return false; }
                 // released==falseの間は発車駅の番線もまだ解放されていない(SimTickの
                 // releaseS通過処理まで占有継続)。[Train.cs:221-224]で確認
                 if (!td.released)
                 {
                     long depPlatKey = ((long)td.departStationId << 32) | (uint)td.departTrack;
                     if (!platformClaims.Add(depPlatKey)) { error = "発車駅番線の二重予約: station " + td.departStationId + " track " + td.departTrack; return false; }
+                }
+
+                // 通過区間・通過駅番線のうち、まだ解放されていない(passedCheckpoints未満で
+                // ない)分をclaimへ追加する(通過駅ごとに「区間」「番線」の2チェックポイントが
+                // ある規約。最終区間はblockKeyで既にclaim済みなのでここには含めない)
+                if (hasTransit)
+                {
+                    int m = td.transitSegmentIds.Length;
+                    int prevId2 = td.departStationId;
+                    for (int i = 0; i < m - 1; i++)
+                    {
+                        int segCpIndex = i * 2, trackCpIndex = i * 2 + 1;
+                        if (segCpIndex >= td.passedCheckpoints)
+                        {
+                            long bKey = ((long)td.transitSegmentIds[i] << 32) | (uint)prevId2;
+                            if (!blockClaims.Add(bKey)) { error = "通過区間の二重予約: segment " + td.transitSegmentIds[i] + " (train " + td.id + ")"; return false; }
+                        }
+                        if (trackCpIndex >= td.passedCheckpoints)
+                        {
+                            long pKey = ((long)td.transitStationIds[i] << 32) | (uint)td.transitTracks[i];
+                            if (!platformClaims.Add(pKey)) { error = "通過駅番線の二重予約: station " + td.transitStationIds[i] + " track " + td.transitTracks[i] + " (train " + td.id + ")"; return false; }
+                        }
+                        prevId2 = td.transitStationIds[i];
+                    }
                 }
             }
             else if (td.state == 0) // Dwell
@@ -887,7 +1085,7 @@ public static class SaveLoad
     // 途中で例外が起きた場合はstaging rootだけを破棄し、既存ワールド・GameState・
     // TrackNetwork/Servicesは一切変更されない(実装後レビューでCodex CLIが指摘した
     // 「ロードがトランザクショナルでない」Critical指摘への対応)
-    static bool ApplyToWorld(GameDataV3 d, out string error)
+    static bool ApplyToWorld(GameDataV4 d, out string error)
     {
         error = null;
         var stagingRoot = new GameObject("LoadStaging");
@@ -964,7 +1162,7 @@ public static class SaveLoad
 
             // stable ID昇順で生成する(同tickでの番線・閉塞競合の決定性のため。
             // Bootstrap.SimTickはTrackNetwork.trainsの登録順で列車を処理する)
-            var sortedTr = new List<TrDataV2>(d.tr);
+            var sortedTr = new List<TrDataV3>(d.tr);
             sortedTr.Sort((x, y) => x.id.CompareTo(y.id));
             var stagedTrains = new List<Train>();
             var stagedSpecs = new List<Train.RestoreSpec>();
@@ -982,6 +1180,20 @@ public static class SaveLoad
                     // -1は動的選択の正当な値としてそのまま保持する(直上のコメント参照)
                     int tr = (td.tracks != null && i < td.tracks.Length) ? td.tracks[i] : -1;
                     tracks.Add(tr);
+                }
+
+                // 通過駅(スキップストップ)を挟む多区間なら、保存されたID列を生きた
+                // Station/TrackSegment参照へ解決する(Validateで存在・整合性を確認済み)
+                List<TrackSegment> transitSegs = null;
+                List<Station> transitStations = null;
+                List<int> transitTracksResolved = null;
+                if (td.transitSegmentIds != null && td.transitSegmentIds.Length > 1)
+                {
+                    transitSegs = new List<TrackSegment>();
+                    foreach (var sid in td.transitSegmentIds) transitSegs.Add(segById[sid]);
+                    transitStations = new List<Station>();
+                    foreach (var stid in td.transitStationIds) transitStations.Add(stById[stid]);
+                    transitTracksResolved = new List<int>(td.transitTracks);
                 }
 
                 var spec = new Train.RestoreSpec
@@ -1009,6 +1221,10 @@ public static class SaveLoad
                     releaseS = td.releaseS,
                     released = td.released,
                     legSegment = td.legSegmentId != 0 && segById.TryGetValue(td.legSegmentId, out var lseg) ? lseg : null,
+                    transitSegments = transitSegs,
+                    transitStations = transitStations,
+                    transitTracksAtStations = transitTracksResolved,
+                    passedCheckpoints = td.passedCheckpoints,
                     onboard = BuildOnboard(td.onboard, stById),
                     departureCount = td.departureCount,
                     arrivalCount = td.arrivalCount,
@@ -1042,10 +1258,27 @@ public static class SaveLoad
                 spec.route[td.idx].TryReserveSpecific(td.curTrack);
                 if (spec.isRunning)
                 {
-                    spec.legSegment.TryEnter(spec.departStation, trn);
+                    bool hasTransit = spec.transitSegments != null && spec.transitSegments.Count > 1;
+                    Station finalSegFrom = hasTransit ? spec.transitStations[spec.transitStations.Count - 1] : spec.departStation;
+                    spec.legSegment.TryEnter(finalSegFrom, trn);
                     // released==falseの間は発車駅の番線もまだ解放されていない
                     // (SimTickのreleaseS通過処理まで占有継続。[Train.cs:221-224]参照)
                     if (!spec.released) spec.departStation.TryReserveSpecific(spec.departTrack);
+
+                    // 通過区間・通過駅番線のうち、まだ解放されていない(passedCheckpoints未満で
+                    // ない)分を反映する(Validateの同じ規約に対応する適用側)
+                    if (hasTransit)
+                    {
+                        int m = spec.transitSegments.Count;
+                        Station prevSt = spec.departStation;
+                        for (int k = 0; k < m - 1; k++)
+                        {
+                            int segCpIndex = k * 2, trackCpIndex = k * 2 + 1;
+                            if (segCpIndex >= td.passedCheckpoints) spec.transitSegments[k].TryEnter(prevSt, trn);
+                            if (trackCpIndex >= td.passedCheckpoints) spec.transitStations[k].TryReserveSpecific(spec.transitTracksAtStations[k]);
+                            prevSt = spec.transitStations[k];
+                        }
+                    }
                 }
             }
 

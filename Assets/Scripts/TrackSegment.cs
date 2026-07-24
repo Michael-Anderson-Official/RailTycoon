@@ -180,4 +180,50 @@ public static class TrackNetwork
         reachCache[s] = r;
         return r;
     }
+
+    // 経由駅(通過駅)を含む経路探索用。fromからtoまでの実際のホップ列
+    // (どの駅をどのセグメントで通るか)を、Reachableと同じホップ数ベースのBFSで求める。
+    // 距離による重み付けはしない(既存の「隣接=1ホップ」という考え方と一貫させるため)。
+    // 到達不能ならnull、from==toなら空リストを返す
+    public readonly struct PathHop
+    {
+        public readonly Station station; // このホップで到達する駅(起点fromは含まない)
+        public readonly TrackSegment seg; // このホップで使うセグメント
+        public PathHop(Station station, TrackSegment seg) { this.station = station; this.seg = seg; }
+    }
+
+    public static List<PathHop> FindPath(Station from, Station to)
+    {
+        if (from == to) return new List<PathHop>();
+        var prev = new Dictionary<Station, PathHop>();
+        var seen = new HashSet<Station> { from };
+        var q = new Queue<Station>();
+        q.Enqueue(from);
+        while (q.Count > 0)
+        {
+            var cur = q.Dequeue();
+            foreach (var seg in segments)
+            {
+                if (seg.a != cur && seg.b != cur) continue;
+                var o = seg.Other(cur);
+                if (!seen.Add(o)) continue;
+                prev[o] = new PathHop(cur, seg);
+                if (o == to)
+                {
+                    var hops = new List<PathHop>();
+                    var node = to;
+                    while (node != from)
+                    {
+                        var hop = prev[node];
+                        hops.Add(new PathHop(node, hop.seg));
+                        node = hop.station;
+                    }
+                    hops.Reverse();
+                    return hops;
+                }
+                q.Enqueue(o);
+            }
+        }
+        return null;
+    }
 }

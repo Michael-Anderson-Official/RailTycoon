@@ -122,7 +122,7 @@ public class SaveLoadV2Tests
 
         SaveLoad.Save();
         string raw2 = PlayerPrefs.GetString(Key);
-        Assert.That(raw2, Does.Contain("\"v\":3"), "次にSaveすると初めてv3として書き戻ること(M2-DでV3を新設)");
+        Assert.That(raw2, Does.Contain("\"v\":4"), "次にSaveすると初めてv4として書き戻ること(M2-EでV4を新設)");
     }
 
     // ============================================================
