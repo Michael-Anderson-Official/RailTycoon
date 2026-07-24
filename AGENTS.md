@@ -1,0 +1,114 @@
+# AGENTS.md
+
+Claude Codeでの作業から引き継ぎ。READMEに無い「実務上のやり方」をここにまとめる。
+コード自体のWHY(設計判断の理由)はソース中のコメントに書き込み済みなので、ここでは
+繰り返さない。
+
+## プロジェクト概要
+
+Unity 6 (6000.3.20f1)製、京王線モデルの鉄道経営シミュレーション。シーン・UI・メッシュは
+全てコード生成(prefab無し)。決定的な固定tickシミュレーション(`Bootstrap.TickSeconds`)。
+Unityエディタ本体: `C:\Program Files\Unity\Hub\Editor\6000.3.20f1\Editor\Unity.exe`
+
+## 変更→検証→コミットの手順
+
+1. コード変更後、**必ず**以下を実行してから次に進む(1つでも失敗したら原因を直してから
+   進む。テストを削って通すことはしない):
+```
+Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults "Logs/edittest.xml" -logFile "Logs/edittest.log"
+```
+   結果は`Logs/edittest.xml`の`<test-run ... failed="0" ...>`で確認する(現在118件PASS
+   +1件Ignore)。
+2. レガシーバッチも合わせて実行する(NUnit化される前からある手動チェック。
+   Debug.Logで"PASS"/"done"を出し、失敗時は非ゼロ終了):
+```
+Unity.exe -batchmode -nographics -projectPath . -executeMethod TrackTest.Run -logFile "Logs/tracktest.log" -quit
+Unity.exe -batchmode -nographics -projectPath . -executeMethod BlockTest.Run -logFile "Logs/blocktest.log" -quit
+```
+3. 検証用に一時的なEditorスクリプト(`Assets/Editor/XxxProbe.cs`)を作って
+   `-executeMethod`で単発確認するのは良いやり方(このセッションでも多用した)。
+   ただし**コミット前に必ず削除する**(`.cs`と`.cs.meta`の両方)。
+4. `Logs/`配下に生成した一時ログ(`.xml`/`.log`)もコミット前に削除する
+   (Logs自体はリポジトリ内にあるが、テスト実行のたびに増える一時ファイルは残さない)。
+5. コミットメッセージは日本語、詳細に。「ゲーム仕様上の変更」(プレイヤーに見える挙動)と
+   「技術的変更」(型・内部構造等)を分けて明記する。型変更等があった場合、
+   「変更なし」とだけ書かず具体的に書く(過去に「意図的に変更した挙動: なし」とだけ
+   書いて指摘を受けた経緯あり)。
+
+## GitHub push(origin/master)の安全手順
+
+このリポジトリはGitHub上で公開されている(Michael-Anderson-Official/RailTycoon)。
+pushは以下の順序を省略・入れ替えせず必ず守る:
+1. テスト(上記)が全て通ることを確認
+2. `git diff`で意図しないファイル混入が無いか確認
+3. コミット
+4. `git fetch origin`
+5. `git rev-list --left-right --count origin/master...master`で分岐確認
+   (左側=remote側のみが1以上なら、pushせず停止して報告する)
+6. `git log --oneline origin/master..master`で意図しないコミット・生成物・秘密情報を点検
+7. 安全なら`git push origin master`
+8. push後`git rev-parse HEAD`と`git rev-parse origin/master`が一致することを確認
+
+**force push禁止**(`--force-with-lease`も含め、明示指示がない限り)。remote側が
+先行/分岐していたら、勝手にmerge/rebase/pullせず停止して報告する。
+
+## WebGLビルド→デプロイ(gh-pages)は別工程・自動連携なし
+
+`master`へpushしても、実際に遊べるGitHub Pages側(`gh-pages`ブランチ)は**自動更新されない**。
+コード変更を公開ページへ反映するには、`master`をpushした後に毎回以下を行う:
+
+1. WebGLビルド(**時間がかかる: 数分〜10分程度**。バックグラウンドの監視タスクが
+   途中で強制終了されることがあるため、下記のように完全に切り離して実行すること):
+```bash
+nohup "/c/Program Files/Unity/Hub/Editor/6000.3.20f1/Editor/Unity.exe" -batchmode -nographics -projectPath . -executeMethod WebGLBuild.Run -logFile "Logs/webglbuild.log" -quit > /dev/null 2>&1 < /dev/null &
+disown
+```
+   その後、`tasklist | grep Unity.exe`が消えるまで別の監視コマンドで待つ。
+   低メモリ環境ではBrotli圧縮が「not enough memory」で失敗することがあるが、
+   コード起因ではない一時的な問題なのでそのままリトライすればよい。
+2. `Builds/WebGL`は**それ自体が独立したgitリポジトリ**(リモート未設定)で、その
+   `master`ブランチの内容がそのままGitHub Pages(`gh-pages`ブランチ)の中身になる。
+   ビルド後、変更されたファイル(`Build/*.unityweb`等)だけをコミットし、
+   明示URLで`gh-pages`へpushする:
+```bash
+cd Builds/WebGL
+git add -A && git commit -m "WebGL build: <変更内容> (master <コミットハッシュ>)"
+git fetch https://github.com/Michael-Anderson-Official/RailTycoon.git gh-pages
+git rev-list --left-right --count FETCH_HEAD...master   # 0\t1ならfast-forward安全
+git push https://github.com/Michael-Anderson-Official/RailTycoon.git master:gh-pages
+```
+3. push後、`git ls-remote <url> gh-pages`のハッシュが`git rev-parse HEAD`と一致することを
+   確認する。
+
+## Codexレビュー
+
+ユーザーはCodexによる実装後レビューを毎回入れる運用を希望している(利用上限に
+達している場合はスキップしてよいが、その旨を明示すること)。このセッションでは
+2026-07-29までCodexの利用上限に達していたため、直近のコミット群(台車追従修正〜
+通過駅(スキップストップ)対応まで)は**未レビュー**。引き継ぎ後、余力があれば
+直近のコミット(`git log`参照)から順にレビューすることを推奨する。
+
+## アーキテクチャ早見表
+
+- `Train.cs`: 列車の状態機械(Dwell/Run)、発着処理(`TryDepart`/`Arrive`)、経路構築
+  (`BuildLeg`/`BuildMultiLeg`)、台車追従(`PlaceCarsStatic`)
+- `TrackSegment.cs`: 駅間の閉塞(`TryEnter`/`Leave`)、`TrackNetwork`(駅・線路・列車の
+  台帳、`Reachable`/`FindPath`)
+- `Station.cs` / `StationLayout.cs`: 駅の面数・番線構成、番線予約(`TryReserve*`)、
+  ホーム縁(乗降モード)
+- `RailKit.cs`: メッシュ生成共通部品、曲線生成(`SmoothConnectPath`=PI法の駅間カーブ、
+  `HermitePath`=フォールバック)
+- `SaveLoad.cs`: JSONセーブ(PlayerPrefs/WebGLはIndexedDB)。バージョン付きスキーマ
+  (現在v4)、v1からの多段migration、ロード前の全件Validate→Apply(トランザクショナル)
+- `BuildController.cs` / `UIController.cs`: 建設・経路構築のモード管理とuGUI
+
+## 直近の変更(このセッションでの作業、新しい順)
+
+- 系統作成に駅検索UI追加＋通過駅(スキップストップ)対応(FindPath/BuildMultiLeg/
+  SaveLoad v4)
+- 駅間カーブをPI法(接線交点)による滑らかな線形に変更、継ぎ目の隙間解消
+- 駅間の線路を直線→曲線化、渡り線ルート修正、台車の個別追従化
+- 線路タップのタッチ直後ゴーストクリック対策
+- ホーム長・両数のずれ修正
+
+いずれも`git log --oneline`で追跡可能。各コミットメッセージに検証内容を明記している。
