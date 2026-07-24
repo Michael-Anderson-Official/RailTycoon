@@ -177,6 +177,49 @@ public static class RailKit
         return pts;
     }
 
+    // p0(接線tan0)からp1(接線tan1)へ、実際の鉄道の線形(直線→一定半径に近い円弧→直線)
+    // に近い見た目になるよう、2本の接線の交点(PI、鉄道・道路設計でいう交角点)を
+    // 制御点とする2次ベジエで結ぶ。3次エルミート(HermitePath)は曲率が場所によって
+    // 不均一になりやすく、S字や不自然な膨らみが出ることがあるのに対し、この方式は
+    // 実際の線形設計と同じ考え方で、より一定に近い滑らかなカーブになる。
+    // 2接線がほぼ平行、PIが正しい側(p0からtan0方向・p1からtan1の来た側)に
+    // 無い、PIが弦長に対して極端に遠い、のいずれかの場合はHermitePathへ
+    // フォールバックする(直線に近い/鋭角すぎる等でPI法が破綻するケース)
+    public static List<Vector3> SmoothConnectPath(Vector3 p0, Vector3 tan0, Vector3 p1, Vector3 tan1, int n)
+    {
+        Vector3 d0 = tan0, d1 = tan1;
+        d0.y = 0; d1.y = 0;
+        if (d0.sqrMagnitude < 1e-8f || d1.sqrMagnitude < 1e-8f)
+            return HermitePath(p0, tan0, p1, tan1, n);
+        d0.Normalize();
+        d1.Normalize();
+
+        // p0 + t*d0 = p1 + s*d1 をXZ平面で解く
+        float det = d1.x * d0.z - d0.x * d1.z;
+        float dist = Vector3.Distance(p0, p1);
+        if (Mathf.Abs(det) < 1e-5f) return HermitePath(p0, tan0, p1, tan1, n); // ほぼ平行
+
+        float bx = p1.x - p0.x, bz = p1.z - p0.z;
+        float t = (-bx * d1.z + d1.x * bz) / det;
+        float s = (d0.x * bz - bx * d0.z) / det;
+
+        // PIがp0からtan0方向(t>0)・p1からtan1の来た側(s<0)にあり、かつ弦長に対して
+        // 極端に遠くないことを確認する。外れる場合は不自然なカーブになるため
+        // フォールバックする
+        if (t <= 0.01f || s >= -0.01f || t > dist * 6f || -s > dist * 6f)
+            return HermitePath(p0, tan0, p1, tan1, n);
+
+        Vector3 pi = p0 + d0 * t;
+        var pts = new List<Vector3>(n + 1);
+        for (int i = 0; i <= n; i++)
+        {
+            float u = i / (float)n;
+            float w0 = (1f - u) * (1f - u), w1 = 2f * (1f - u) * u, w2 = u * u;
+            pts.Add(w0 * p0 + w1 * pi + w2 * p1);
+        }
+        return pts;
+    }
+
     // Chaikin平滑化(端点固定)
     public static List<Vector3> Chaikin(List<Vector3> pts, int iterations)
     {

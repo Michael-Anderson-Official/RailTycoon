@@ -513,13 +513,13 @@ public class Train : MonoBehaviour
 
         var endA = from.End(exitSign);
         var endB = to.End(enterSign);
-        // 駅間は直線ではなく、両駅それぞれの発着方向(Axis*sign)へ滑らかに接続する
-        // 曲線(3次エルミート)にする。駅同士が斜めに向き合っていても、駅を出た瞬間に
-        // 進行方向が折れ曲がらないようにするため
+        // 駅間は直線ではなく、両駅それぞれの発着方向(Axis*sign)へ、実際の鉄道のように
+        // 一定半径に近い滑らかな曲線で接続する。駅同士が斜めに向き合っていても、
+        // 駅を出た瞬間に進行方向が折れ曲がらないようにするため
         float dist = Vector3.Distance(endA, endB);
         int curveN = Mathf.Max(16, Mathf.CeilToInt(dist / 15f));
         Vector3 tan0 = from.Axis * exitSign, tan1 = -(to.Axis * enterSign);
-        var curve = RailKit.HermitePath(endA, tan0, endB, tan1, curveN);
+        var curve = RailKit.SmoothConnectPath(endA, tan0, endB, tan1, curveN);
         // 左側通行(実際のレールと同じ規約)。端点は近似接線でなくtan0/tan1そのものを使い、
         // 駅の自前スロートのレールと厳密に一致させる(列車がレールから見えて外れないため)
         var curveOffset = RailKit.OffsetWithEndTangents(curve, 2.3f, tan0, tan1);
