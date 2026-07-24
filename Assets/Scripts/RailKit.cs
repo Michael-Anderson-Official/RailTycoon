@@ -131,6 +131,29 @@ public static class RailKit
         return r;
     }
 
+    // p0からp1へ、それぞれtan0/tan1の向き(大きさは無視、内部で弦長の0.35倍へ
+    // 正規化する)へ滑らかに発着する3次エルミート曲線をn+1点に離散化する。
+    // 駅同士を結ぶ線路が、駅を出た瞬間に折れ曲がらず滑らかにカーブするようにするため
+    // (直線Lerpだと、斜めに向き合う駅同士がキンク(急な折れ)で繋がってしまう)
+    public static List<Vector3> HermitePath(Vector3 p0, Vector3 tan0, Vector3 p1, Vector3 tan1, int n)
+    {
+        float mag = Vector3.Distance(p0, p1) * 0.35f;
+        Vector3 t0 = tan0.sqrMagnitude > 1e-8f ? tan0.normalized * mag : Vector3.zero;
+        Vector3 t1 = tan1.sqrMagnitude > 1e-8f ? tan1.normalized * mag : Vector3.zero;
+        var pts = new List<Vector3>(n + 1);
+        for (int i = 0; i <= n; i++)
+        {
+            float t = i / (float)n;
+            float tt = t * t, ttt = tt * t;
+            float h00 = 2f * ttt - 3f * tt + 1f;
+            float h10 = ttt - 2f * tt + t;
+            float h01 = -2f * ttt + 3f * tt;
+            float h11 = ttt - tt;
+            pts.Add(h00 * p0 + h10 * t0 + h01 * p1 + h11 * t1);
+        }
+        return pts;
+    }
+
     // Chaikin平滑化(端点固定)
     public static List<Vector3> Chaikin(List<Vector3> pts, int iterations)
     {

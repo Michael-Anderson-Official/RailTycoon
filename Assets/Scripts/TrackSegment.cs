@@ -65,16 +65,16 @@ public class TrackSegment
         RailKit.MeshGO("Tie", tie.ToMesh(), MatLib.Get("Tie"), go.transform);
     }
 
-    // A端→B端の中心線(80m刻み)
+    // A端→B端の中心線。両駅それぞれの発着方向(Axis*sign)へ滑らかに接続する
+    // 曲線(3次エルミート、Train.BuildLegの駅間区間と同じ規約)にする。直線Lerpだと、
+    // 駅同士が斜めに向き合っている場合に駅を出た瞬間で折れ曲がって見えてしまうため
     public List<Vector3> CenterPoints()
     {
         var p0 = EndA;
         var p1 = EndB;
         float d = Vector3.Distance(p0, p1);
-        int n = Mathf.Max(2, Mathf.CeilToInt(d / 80f) + 1);
-        var pts = new List<Vector3>(n);
-        for (int i = 0; i < n; i++) pts.Add(Vector3.Lerp(p0, p1, i / (float)(n - 1)));
-        return pts;
+        int n = Mathf.Max(12, Mathf.CeilToInt(d / 20f));
+        return RailKit.HermitePath(p0, a.Axis * signA, p1, -(b.Axis * signB), n);
     }
 }
 

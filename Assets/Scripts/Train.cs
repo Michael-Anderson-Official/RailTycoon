@@ -513,11 +513,15 @@ public class Train : MonoBehaviour
 
         var endA = from.End(exitSign);
         var endB = to.End(enterSign);
-        var d = (endB - endA).normalized;
-        var right = Vector3.Cross(Vector3.up, d).normalized;
-        var ml = right * -2.3f; // 左側通行
-        // 駅間区間の始点(endA+ml)を出発駅のローカル座標に戻し、本線側のオフセットを得る
-        float mainF = from.transform.InverseTransformPoint(endA + ml).x;
+        // 駅間は直線ではなく、両駅それぞれの発着方向(Axis*sign)へ滑らかに接続する
+        // 曲線(3次エルミート)にする。駅同士が斜めに向き合っていても、駅を出た瞬間に
+        // 進行方向が折れ曲がらないようにするため
+        float dist = Vector3.Distance(endA, endB);
+        int curveN = Mathf.Max(12, Mathf.CeilToInt(dist / 20f));
+        var curve = RailKit.HermitePath(endA, from.Axis * exitSign, endB, -(to.Axis * enterSign), curveN);
+        var curveOffset = RailKit.Offset(curve, 2.3f); // 左側通行(実際のレールと同じ規約)
+        // 駅間区間の始点(curveOffset[0])を出発駅のローカル座標に戻し、本線側のオフセットを得る
+        float mainF = from.transform.InverseTransformPoint(curveOffset[0]).x;
 
         pts.Add(from.TrackWorldPoint(fromTrack, -exitSign * halfTrain));
         pts.Add(from.TrackWorldPoint(fromTrack, 0));
@@ -527,15 +531,12 @@ public class Train : MonoBehaviour
             pts.Add(from.transform.TransformPoint(new Vector3(mainF, 0, exitSign * (hf + tf - L * 0.5f)))); // 両渡り線で本線側へ
         pts.Add(from.transform.TransformPoint(new Vector3(mainF, 0, exitSign * (hf + tf))));         // 駅端(リード端、本線側)
 
-        float dist = Vector3.Distance(endA, endB);
-        int n = Mathf.Max(2, Mathf.CeilToInt(dist / 40f) + 1);
-        for (int i = 0; i < n; i++)
-            pts.Add(Vector3.Lerp(endA, endB, i / (float)(n - 1)) + ml);
+        pts.AddRange(curveOffset);
 
         float ht = to.HalfLen;
         float offT = to.layout.trackOffsets[toTrack];
         float convT = Mathf.Sign(offT) * 2.3f;
-        float mainT = to.transform.InverseTransformPoint(endB + ml).x;
+        float mainT = to.transform.InverseTransformPoint(curveOffset[curveOffset.Count - 1]).x;
         pts.Add(to.transform.TransformPoint(new Vector3(mainT, 0, enterSign * (ht + tf))));          // 駅端(リード端、本線側)
         if (Mathf.Abs(mainT - convT) > CrossoverMismatch)
             pts.Add(to.transform.TransformPoint(new Vector3(mainT, 0, enterSign * (ht + tf - L * 0.5f)))); // 両渡り線で自線側へ
