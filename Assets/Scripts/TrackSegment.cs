@@ -55,8 +55,12 @@ public class TrackSegment
         var rail = new RailKit.MeshData();
         var tie = new RailKit.MeshData();
         var center = CenterPoints();
-        RailKit.AddTrack(ballast, rail, tie, RailKit.Offset(center, 2.3f));
-        RailKit.AddTrack(ballast, rail, tie, RailKit.Offset(center, -2.3f));
+        // 端点の法線は近傍点からの近似(NormalAt)ではなく、駅の発着方向そのもの
+        // (CenterPointsのエルミート曲線に渡したのと同じ接線)を使い、駅の自前スロートの
+        // 線路と隙間なく繋がるようにする
+        Vector3 tan0 = a.Axis * signA, tan1 = -(b.Axis * signB);
+        RailKit.AddTrack(ballast, rail, tie, RailKit.OffsetWithEndTangents(center, 2.3f, tan0, tan1));
+        RailKit.AddTrack(ballast, rail, tie, RailKit.OffsetWithEndTangents(center, -2.3f, tan0, tan1));
 
         // 渡り線は駅前(スロートのリード)に駅側で描く。segmentには描かない
         length = Vector3.Distance(EndA, EndB);
@@ -73,7 +77,7 @@ public class TrackSegment
         var p0 = EndA;
         var p1 = EndB;
         float d = Vector3.Distance(p0, p1);
-        int n = Mathf.Max(12, Mathf.CeilToInt(d / 20f));
+        int n = Mathf.Max(16, Mathf.CeilToInt(d / 15f));
         return RailKit.HermitePath(p0, a.Axis * signA, p1, -(b.Axis * signB), n);
     }
 }

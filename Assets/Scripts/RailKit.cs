@@ -131,6 +131,29 @@ public static class RailKit
         return r;
     }
 
+    // Offset()と同じだが、始点/終点だけは近傍点からの近似接線(NormalAt)ではなく、
+    // 呼び出し側が知っている正確な接線(tan0/tan1)を使う。エルミート曲線(HermitePath)の
+    // 両端は、駅側の線路の接線と厳密に一致させたい(近似だと点数が少ないほど数十cm〜
+    // 1m弱ずれ、駅の自前スロートのメッシュとの継ぎ目に隙間が見えてしまう)ため
+    public static List<Vector3> OffsetWithEndTangents(List<Vector3> pts, float lateral, Vector3 tan0, Vector3 tan1)
+    {
+        var r = new List<Vector3>(pts.Count);
+        for (int i = 0; i < pts.Count; i++)
+        {
+            Vector3 n = i == 0 ? LeftOf(tan0) : i == pts.Count - 1 ? LeftOf(tan1) : NormalAt(pts, i);
+            r.Add(pts[i] + n * lateral);
+        }
+        return r;
+    }
+
+    static Vector3 LeftOf(Vector3 tan)
+    {
+        tan.y = 0;
+        if (tan.sqrMagnitude < 1e-8f) tan = Vector3.forward;
+        tan.Normalize();
+        return new Vector3(-tan.z, 0, tan.x);
+    }
+
     // p0からp1へ、それぞれtan0/tan1の向き(大きさは無視、内部で弦長の0.35倍へ
     // 正規化する)へ滑らかに発着する3次エルミート曲線をn+1点に離散化する。
     // 駅同士を結ぶ線路が、駅を出た瞬間に折れ曲がらず滑らかにカーブするようにするため

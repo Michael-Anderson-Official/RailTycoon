@@ -517,9 +517,12 @@ public class Train : MonoBehaviour
         // 曲線(3次エルミート)にする。駅同士が斜めに向き合っていても、駅を出た瞬間に
         // 進行方向が折れ曲がらないようにするため
         float dist = Vector3.Distance(endA, endB);
-        int curveN = Mathf.Max(12, Mathf.CeilToInt(dist / 20f));
-        var curve = RailKit.HermitePath(endA, from.Axis * exitSign, endB, -(to.Axis * enterSign), curveN);
-        var curveOffset = RailKit.Offset(curve, 2.3f); // 左側通行(実際のレールと同じ規約)
+        int curveN = Mathf.Max(16, Mathf.CeilToInt(dist / 15f));
+        Vector3 tan0 = from.Axis * exitSign, tan1 = -(to.Axis * enterSign);
+        var curve = RailKit.HermitePath(endA, tan0, endB, tan1, curveN);
+        // 左側通行(実際のレールと同じ規約)。端点は近似接線でなくtan0/tan1そのものを使い、
+        // 駅の自前スロートのレールと厳密に一致させる(列車がレールから見えて外れないため)
+        var curveOffset = RailKit.OffsetWithEndTangents(curve, 2.3f, tan0, tan1);
         // 駅間区間の始点(curveOffset[0])を出発駅のローカル座標に戻し、本線側のオフセットを得る
         float mainF = from.transform.InverseTransformPoint(curveOffset[0]).x;
 
