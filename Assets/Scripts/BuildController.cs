@@ -141,10 +141,11 @@ public class BuildController : MonoBehaviour
             case Mode.Track:
                 if (tapped != null) TapTrackStation(tapped);
                 else if (trackFirst != null)
-                {
-                    ClearTrackSel();
-                    UIController.Toast("選択を解除しました");
-                }
+                    // 駅を外したタップでは選択を解除しない(ズームや視点調整の合間に外れた
+                    // タップで最初からやり直しになるのを避けるため。取り消したい場合は
+                    // 選択中の駅をもう一度タップする)
+                    UIController.Toast(trackFirst.stationName + "を選択中。接続先の駅をタップ" +
+                        "(ズームすると狙いやすい。取り消すには選択中の駅をもう一度タップ)");
                 else if (TrackNetwork.stations.Count < 2)
                     UIController.Toast("先に「駅」モードで駅を2つ建ててください(「ここに建設」で確定)");
                 else
