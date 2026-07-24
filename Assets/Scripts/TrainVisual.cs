@@ -8,6 +8,9 @@ public static class TrainVisual
 {
     const float CarLen = 19.4f;
     const float HalfLen = CarLen * 0.5f;
+    // 台車中心のz位置(車体ローカル、進行方向)。Train.PlaceCarsStaticが同じ値を
+    // 参照して弧長サンプル位置を決めるので、変更する場合は両方を合わせること
+    public const float BogieOffset = 6.2f;
 
     // 車体断面(正面図。x横/y縦、床上0.65〜屋根4.15)。反時計回り
     static readonly Vector2[] BodySection =
@@ -26,7 +29,9 @@ public static class TrainVisual
         new Vector2(-1.42f, 0.65f),
     };
 
-    public static List<Transform> BuildCars(Transform root, TrainCatalog.Formation fm)
+    // 1両分の主要Transform。bogieF/bogieRはPlaceCarsStaticが弧長サンプルで
+    // 独立に位置・向きを合わせる台車(先頭寄り/後尾寄り)
+    public static List<(Transform body, Transform bogieF, Transform bogieR)> BuildCars(Transform root, TrainCatalog.Formation fm)
     {
         var t = fm.type;
         var bodyMat = MatLib.Tinted("TrainBase", t.body);
@@ -39,7 +44,7 @@ public static class TrainVisual
         var underMat = MatLib.Get("TrainUnder");
         var pantoMat = MatLib.Get("TrainPanto");
 
-        var cars = new List<Transform>();
+        var cars = new List<(Transform body, Transform bogieF, Transform bogieR)>();
         for (int i = 0; i < fm.cars; i++)
         {
             bool headEnd = i == 0;
@@ -132,26 +137,36 @@ public static class TrainVisual
             if (bandHi.v.Count > 0) RailKit.MeshGO("BandHi", bandHi.ToMesh(), stripeMat, go.transform);
             RailKit.MeshGO("BandLo", bandLo.ToMesh(), band2Mat, go.transform);
 
-            // 床下機器+台車(側枠・車軸・車輪を作り込む)
+            // 床下機器(車体に固定、台車とは独立)
             var under = new RailKit.MeshData();
             RailKit.AddBox(under, new Vector3(0, 0.42f, 0), new Vector3(2.5f, 0.62f, CarLen - 5f), Quaternion.identity); // 床下機器箱
             RailKit.AddBox(under, new Vector3(1.15f, 0.5f, 2.5f), new Vector3(0.5f, 0.5f, 3.0f), Quaternion.identity);    // 補機
             RailKit.AddBox(under, new Vector3(-1.1f, 0.45f, -3f), new Vector3(0.6f, 0.55f, 2.4f), Quaternion.identity);
-            foreach (float bz in new[] { 6.2f, -6.2f })
+            RailKit.MeshGO("Under", under.ToMesh(), underMat, go.transform);
+
+            // 台車(側枠・車軸・車輪)は車体とは別Transformの子として作る。
+            // PlaceCarsStaticが台車ごとに自分の弧長位置でレール中心線を独立サンプルして
+            // 向きを合わせるので、渡り線のような急なカーブでも車体1枚の平均姿勢に
+            // 引っ張られず、車輪が必ずレールへ追従する(BogieOffsetと一致させること)
+            Transform bogieF = null, bogieR = null;
+            foreach (float bz in new[] { BogieOffset, -BogieOffset })
             {
-                // 台車枠(左右側枠+枕梁)
+                var bogieGo = new GameObject(bz > 0 ? "BogieF" : "BogieR");
+                bogieGo.transform.SetParent(go.transform, false);
+                bogieGo.transform.localPosition = new Vector3(0, 0, bz);
+                var bogie = new RailKit.MeshData(); // メッシュ座標は台車中心(bz)基準のローカル
                 for (int side = -1; side <= 1; side += 2)
-                    RailKit.AddBox(under, new Vector3(1.02f * side, 0.5f, bz), new Vector3(0.16f, 0.42f, 2.9f), Quaternion.identity);
-                RailKit.AddBox(under, new Vector3(0, 0.62f, bz), new Vector3(2.1f, 0.3f, 0.7f), Quaternion.identity);
-                // 車軸+車輪(2軸)
+                    RailKit.AddBox(bogie, new Vector3(1.02f * side, 0.5f, 0), new Vector3(0.16f, 0.42f, 2.9f), Quaternion.identity); // 側枠
+                RailKit.AddBox(bogie, new Vector3(0, 0.62f, 0), new Vector3(2.1f, 0.3f, 0.7f), Quaternion.identity); // 枕梁
                 foreach (float wz in new[] { 0.95f, -0.95f })
                 {
-                    RailKit.AddBox(under, new Vector3(0, 0.42f, bz + wz), new Vector3(2.0f, 0.16f, 0.16f), Quaternion.identity); // 車軸
+                    RailKit.AddBox(bogie, new Vector3(0, 0.42f, wz), new Vector3(2.0f, 0.16f, 0.16f), Quaternion.identity); // 車軸
                     for (int side = -1; side <= 1; side += 2)
-                        RailKit.AddBox(under, new Vector3(1.02f * side, 0.42f, bz + wz), new Vector3(0.24f, 0.86f, 0.86f), Quaternion.identity); // 車輪
+                        RailKit.AddBox(bogie, new Vector3(1.02f * side, 0.42f, wz), new Vector3(0.24f, 0.86f, 0.86f), Quaternion.identity); // 車輪
                 }
+                RailKit.MeshGO("BogieMesh", bogie.ToMesh(), underMat, bogieGo.transform);
+                if (bz > 0) bogieF = bogieGo.transform; else bogieR = bogieGo.transform;
             }
-            RailKit.MeshGO("Under", under.ToMesh(), underMat, go.transform);
 
             // パンタグラフ(シングルアーム)
             if (t.keio5000)
@@ -183,7 +198,7 @@ public static class TrainVisual
             if (!headEnd) AddGangway(go.transform, -1, doorMat);
             if (!tailEnd) AddGangway(go.transform, +1, doorMat);
 
-            cars.Add(go.transform);
+            cars.Add((go.transform, bogieF, bogieR));
         }
         return cars;
     }

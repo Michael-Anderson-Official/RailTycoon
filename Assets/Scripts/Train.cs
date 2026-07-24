@@ -41,7 +41,7 @@ public class Train : MonoBehaviour
     TrackSegment curSeg;      // 走行中の閉塞区間
     Station curSegFrom;
 
-    List<Transform> carTs;
+    List<(Transform body, Transform bogieF, Transform bogieR)> carTs;
     readonly List<(Station dest, int count, Vector3 boardPos)> onboard = new List<(Station, int, Vector3)>();
     int onboardCount;
 
@@ -453,22 +453,46 @@ public class Train : MonoBehaviour
         pos = pf + fwd * 2.2f + Vector3.up * 2.9f;
     }
 
-    // エディタのSnapshotでも使う車両配置(先頭車の弧長sから後方へ並べる)
-    public static void PlaceCarsStatic(List<Transform> cars, List<Vector3> path, float[] cum, float s)
+    // 台車ごとの接線サンプル用の前後窓。狭くしすぎるとレール中心線の折れ点で
+    // 接線がガタつき、広すぎると渡り線のような急カーブで実際の軌道からずれる
+    const float BogieSampleWindow = 1.5f;
+
+    // エディタのSnapshotでも使う車両配置(先頭車の弧長sから後方へ並べる)。
+    // 各台車(前後)は自分の弧長位置でレール中心線を独立サンプルするため、渡り線の
+    // ような急なカーブでも車輪(台車)が必ずレールへ追従する。車体は実車と同様、
+    // 前後の台車中心を結ぶ弦の上に乗る剛体として、その2点から姿勢を決める
+    public static void PlaceCarsStatic(List<(Transform body, Transform bogieF, Transform bogieR)> cars,
+        List<Vector3> path, float[] cum, float s)
     {
         if (cars == null) return;
         float carLen = StationLayout.CarLength;
         for (int i = 0; i < cars.Count; i++)
         {
             float c = s - carLen * 0.5f - i * (carLen + CarGap);
-            Vector3 pf, pr, f;
-            RailKit.Sample(path, cum, c + 7f, out pf, out f);
-            RailKit.Sample(path, cum, c - 7f, out pr, out f);
-            var mid = (pf + pr) * 0.5f + Vector3.up * 0.2f;
-            var fwd = pf - pr;
-            if (fwd.sqrMagnitude < 1e-6f) fwd = Vector3.forward;
-            cars[i].SetPositionAndRotation(mid, Quaternion.LookRotation(fwd.normalized, Vector3.up));
+            var (body, bogieF, bogieR) = cars[i];
+
+            Vector3 fPos = SampleBogie(path, cum, c + TrainVisual.BogieOffset, out Vector3 fFwd);
+            Vector3 rPos = SampleBogie(path, cum, c - TrainVisual.BogieOffset, out Vector3 rFwd);
+            if (bogieF != null) bogieF.SetPositionAndRotation(fPos, Quaternion.LookRotation(fFwd, Vector3.up));
+            if (bogieR != null) bogieR.SetPositionAndRotation(rPos, Quaternion.LookRotation(rFwd, Vector3.up));
+
+            var mid = (fPos + rPos) * 0.5f;
+            var fwd = fPos - rPos;
+            if (fwd.sqrMagnitude < 1e-6f) fwd = fFwd;
+            body.SetPositionAndRotation(mid, Quaternion.LookRotation(fwd.normalized, Vector3.up));
         }
+    }
+
+    // 弧長centerの位置(前後窓±BogieSampleWindowの中点、+0.2m持ち上げ)と接線を返す
+    static Vector3 SampleBogie(List<Vector3> path, float[] cum, float center, out Vector3 fwd)
+    {
+        Vector3 pf, pr, f;
+        RailKit.Sample(path, cum, center + BogieSampleWindow, out pf, out f);
+        RailKit.Sample(path, cum, center - BogieSampleWindow, out pr, out f);
+        fwd = pf - pr;
+        if (fwd.sqrMagnitude < 1e-6f) fwd = f;
+        fwd.Normalize();
+        return (pf + pr) * 0.5f + Vector3.up * 0.2f;
     }
 
     // 駅fromの線fromTrackから駅toの線toTrackまでの走行経路を組む
