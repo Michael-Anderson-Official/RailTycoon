@@ -493,24 +493,40 @@ public class Train : MonoBehaviour
         return (pf + pr) * 0.5f + Vector3.up * 0.2f;
     }
 
-    // 駅fromの線fromTrackから駅toの線toTrackまでの走行経路を組む
+    // 収束点と本線側(左側通行)のオフセットが±0.1m以上ずれていれば、その駅端では
+    // 両渡り線(Station.RebuildTrackVisualのAddCrossover)を渡って本線側へ乗り換える
+    // 必要がある、という判定に使うしきい値
+    const float CrossoverMismatch = 0.1f;
+
+    // 駅fromの線fromTrackから駅toの線toTrackまでの走行経路を組む。
+    // 収束(収束点、駅の自線側±2.3)と、駅間区間で使う本線側(常に左側通行)のオフセットが
+    // 一致しない場合(=停車線が進行方向の反対側だった場合)、リード区間の途中
+    // (Station.RebuildTrackVisualが両渡り線を描く位置と同じz)で乗り換える点を挟み、
+    // 実際に描かれた渡り線の上を通るようにする
     public static List<Vector3> BuildLeg(Station from, int fromTrack, int exitSign,
         Station to, int toTrack, int enterSign, float halfTrain)
     {
         var pts = new List<Vector3>();
         float hf = from.HalfLen, tf = StationLayout.ThroatLen, L = StationLayout.LeadLen;
         float offF = from.layout.trackOffsets[fromTrack];
-        pts.Add(from.TrackWorldPoint(fromTrack, -exitSign * halfTrain));
-        pts.Add(from.TrackWorldPoint(fromTrack, 0));
-        pts.Add(from.TrackWorldPoint(fromTrack, exitSign * hf));                                                     // ホーム端
-        pts.Add(from.transform.TransformPoint(new Vector3(Mathf.Sign(offF) * 2.3f, 0, exitSign * (hf + tf - L))));   // 収束(±2.3)
-        pts.Add(from.transform.TransformPoint(new Vector3(Mathf.Sign(offF) * 2.3f, 0, exitSign * (hf + tf))));       // 駅端(リード端)
+        float convF = Mathf.Sign(offF) * 2.3f;
 
         var endA = from.End(exitSign);
         var endB = to.End(enterSign);
         var d = (endB - endA).normalized;
         var right = Vector3.Cross(Vector3.up, d).normalized;
         var ml = right * -2.3f; // 左側通行
+        // 駅間区間の始点(endA+ml)を出発駅のローカル座標に戻し、本線側のオフセットを得る
+        float mainF = from.transform.InverseTransformPoint(endA + ml).x;
+
+        pts.Add(from.TrackWorldPoint(fromTrack, -exitSign * halfTrain));
+        pts.Add(from.TrackWorldPoint(fromTrack, 0));
+        pts.Add(from.TrackWorldPoint(fromTrack, exitSign * hf));                                     // ホーム端
+        pts.Add(from.transform.TransformPoint(new Vector3(convF, 0, exitSign * (hf + tf - L))));     // 収束(自線側±2.3)
+        if (Mathf.Abs(mainF - convF) > CrossoverMismatch)
+            pts.Add(from.transform.TransformPoint(new Vector3(mainF, 0, exitSign * (hf + tf - L * 0.5f)))); // 両渡り線で本線側へ
+        pts.Add(from.transform.TransformPoint(new Vector3(mainF, 0, exitSign * (hf + tf))));         // 駅端(リード端、本線側)
+
         float dist = Vector3.Distance(endA, endB);
         int n = Mathf.Max(2, Mathf.CeilToInt(dist / 40f) + 1);
         for (int i = 0; i < n; i++)
@@ -518,8 +534,12 @@ public class Train : MonoBehaviour
 
         float ht = to.HalfLen;
         float offT = to.layout.trackOffsets[toTrack];
-        pts.Add(to.transform.TransformPoint(new Vector3(Mathf.Sign(offT) * 2.3f, 0, enterSign * (ht + tf))));       // 駅端(リード端)
-        pts.Add(to.transform.TransformPoint(new Vector3(Mathf.Sign(offT) * 2.3f, 0, enterSign * (ht + tf - L))));   // 収束(±2.3)
+        float convT = Mathf.Sign(offT) * 2.3f;
+        float mainT = to.transform.InverseTransformPoint(endB + ml).x;
+        pts.Add(to.transform.TransformPoint(new Vector3(mainT, 0, enterSign * (ht + tf))));          // 駅端(リード端、本線側)
+        if (Mathf.Abs(mainT - convT) > CrossoverMismatch)
+            pts.Add(to.transform.TransformPoint(new Vector3(mainT, 0, enterSign * (ht + tf - L * 0.5f)))); // 両渡り線で自線側へ
+        pts.Add(to.transform.TransformPoint(new Vector3(convT, 0, enterSign * (ht + tf - L))));       // 収束(自線側±2.3)
         pts.Add(to.TrackWorldPoint(toTrack, enterSign * ht));
         pts.Add(to.TrackWorldPoint(toTrack, 0));
         pts.Add(to.TrackWorldPoint(toTrack, -enterSign * halfTrain));
