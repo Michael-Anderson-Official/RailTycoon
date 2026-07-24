@@ -57,10 +57,12 @@ public class CameraRig : MonoBehaviour
             transform.SetPositionAndRotation(p, cabRot);
             return;
         }
-        if (Input.touchCount > 0) HandleTouch();
+        if (Input.touchCount > 0) { HandleTouch(); lastTouchTime = Time.unscaledTime; }
         else HandleMouse();
         Apply();
     }
+
+    float lastTouchTime = -10f;
 
     void HandleTouch()
     {
@@ -105,6 +107,12 @@ public class CameraRig : MonoBehaviour
     void HandleMouse()
     {
         lastPinch = -1;
+        // タッチ操作の直後は無視する。スマホのブラウザはtouchend後に遅れて
+        // 合成マウスイベント(ゴーストクリック)を発火することがあり、これを本物の
+        // クリックとして処理すると、実タッチで選択した直後に同じ座標へ「クリック」が
+        // 飛んで同じ駅を二重タップした扱いになり(線路モードの「同じ駅を再タップで
+        // 選択解除」等)、選択した瞬間に解除されたように見えてしまう
+        if (Time.unscaledTime - lastTouchTime < 0.8f) return;
         if (Input.GetMouseButtonDown(0))
         {
             downPos = Input.mousePosition;
