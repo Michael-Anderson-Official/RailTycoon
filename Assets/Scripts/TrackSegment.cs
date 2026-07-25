@@ -98,6 +98,35 @@ public class TrackSegment
         int n = Mathf.Max(16, Mathf.CeilToInt(d / 15f));
         return RailKit.SmoothConnectPath(p0, a.Axis * signA, p1, -(b.Axis * signB), n);
     }
+
+    // 複線の道床が中心線から左右へ張り出す量(線間±2.3 + 道床肩)。
+    // 途中駅のホームを踏むかどうかの判定に使う
+    public const float TrackOffset = 2.3f;
+    public const float BedHalfWidth = 2.5f;
+    public const float HalfCorridorWidth = TrackOffset + BedHalfWidth;
+
+    // この区間(a↔b)を敷いた場合に、道床が平面上でホームを踏んでしまう駅を返す。
+    // 両端の駅自身は当然自分のホーム際を通るので除外する。踏まなければnull。
+    // Build()前でも呼べるよう、GameObjectではなくCenterPoints()の形状だけで判定する
+    public Station FindStationCrossedByBed()
+    {
+        var center = CenterPoints();
+        foreach (var st in TrackNetwork.stations)
+        {
+            if (st == null || st == a || st == b || st.preview) continue;
+            // 曲線の折れ目を跨いで踏むこともあるため、点列の間も補間して見る
+            for (int i = 0; i + 1 < center.Count; i++)
+            {
+                const int sub = 4;
+                for (int k = 0; k < sub; k++)
+                {
+                    var p = Vector3.Lerp(center[i], center[i + 1], k / (float)sub);
+                    if (st.PlatformAreaContains(p, HalfCorridorWidth)) return st;
+                }
+            }
+        }
+        return null;
+    }
 }
 
 // 駅と線路の台帳+到達可能判定

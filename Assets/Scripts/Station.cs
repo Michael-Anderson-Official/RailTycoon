@@ -361,6 +361,25 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("SwitchBox", swBox.ToMesh(), MatLib.Get("SwitchBox"), tw.transform);
     }
 
+    // ワールド座標の点が、この駅のホーム躯体の平面範囲(marginだけ広げたもの)に
+    // 入っているか。駅間の線路が途中の駅のホームを貫通しないか判定するのに使う
+    // (TrackSegmentは両端の駅しか見ないため、間に別の駅があっても素通しで描画される)。
+    // Build()前でlayoutが未設定の場合はfalse
+    public bool PlatformAreaContains(Vector3 world, float margin)
+    {
+        if (layout.platforms == null || layout.platforms.Count == 0) return false;
+        var local = transform.InverseTransformPoint(world);
+        float halfLen = cars * StationLayout.CarLength * 0.5f;
+        if (Mathf.Abs(local.z) > halfLen + margin) return false;
+        foreach (var p in layout.platforms)
+        {
+            // Build()のvisualWと同じ描画幅を使う(判定と見た目をずらさない)
+            float visualW = Mathf.Max(2.6f, p.y - 0.02f);
+            if (Mathf.Abs(local.x - p.x) <= visualW * 0.5f + margin) return true;
+        }
+        return false;
+    }
+
     public Vector3 TrackWorldPoint(int trackIdx, float z)
         => transform.TransformPoint(new Vector3(layout.trackOffsets[trackIdx], 0, z));
 

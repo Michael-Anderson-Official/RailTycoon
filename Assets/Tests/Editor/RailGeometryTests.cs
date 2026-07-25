@@ -144,4 +144,67 @@ public class RailGeometryTests
                     Is.LessThanOrEqualTo(CameraRig.NetworkFrameFill + 0.0001f));
             }
     }
+
+    // ---- 駅間の線路が途中の駅のホームを貫かないこと ----
+    // TrackSegmentは両端の駅しか見ないため、間に別の駅がある区間を直結すると
+    // 道床がその駅のホームを踏み抜いて描画される(実機で確認された不具合)。
+    // 建設時に弾けるよう、判定側を数値で固定する
+
+    static Station Line(float z, float yaw, string name)
+        => EditModeTestHelpers.MakeStation(new Vector3(0, 0, z), yaw, 10, 2, 2, name);
+
+    static Station CrossedBy(Station a, Station b)
+    {
+        int bestSa = 1, bestSb = 1;
+        float best = float.MaxValue;
+        for (int sa = -1; sa <= 1; sa += 2)
+            for (int sb = -1; sb <= 1; sb += 2)
+            {
+                float d = Vector3.Distance(a.End(sa), b.End(sb));
+                if (d < best) { best = d; bestSa = sa; bestSb = sb; }
+            }
+        return new TrackSegment { a = a, b = b, signA = bestSa, signB = bestSb }.FindStationCrossedByBed();
+    }
+
+    [Test]
+    public void SegmentCrossingAnotherStation_IsDetected()
+    {
+        var a = Line(-1500, 0, "A");
+        var b = Line(0, 0, "B");
+        var c = Line(1500, 0, "C");
+
+        Assert.That(CrossedBy(a, c), Is.EqualTo(b),
+            "間にある駅Bを貫く区間は、その駅を返して建設を拒否できること");
+    }
+
+    [Test]
+    public void SegmentBetweenAdjacentStations_IsAllowed()
+    {
+        var a = Line(-1500, 0, "A");
+        var b = Line(0, 0, "B");
+        var c = Line(1500, 0, "C");
+
+        Assert.That(CrossedBy(a, b), Is.Null, "隣接駅同士の正常な区間を誤検出しないこと");
+        Assert.That(CrossedBy(b, c), Is.Null);
+    }
+
+    [Test]
+    public void SegmentPassingBesideAStation_IsAllowed()
+    {
+        var a = Line(-1500, 0, "A");
+        // 線から十分横へ外れた駅は、通り沿いにあっても貫通ではない
+        EditModeTestHelpers.MakeStation(new Vector3(260, 0, 0), 0, 10, 2, 2, "Beside");
+        var c = Line(1500, 0, "C");
+
+        Assert.That(CrossedBy(a, c), Is.Null, "脇に逸れた駅を誤検出しないこと");
+    }
+
+    [Test]
+    public void SegmentBetweenMisalignedStations_IsAllowed()
+    {
+        var a = EditModeTestHelpers.MakeStation(new Vector3(0, 0, -900), 25, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(400, 0, 900), -15, 10, 2, 2, "B");
+
+        Assert.That(CrossedBy(a, b), Is.Null, "駅の向きが接続方向とズレていても誤検出しないこと");
+    }
 }

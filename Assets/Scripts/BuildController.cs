@@ -365,6 +365,16 @@ public class BuildController : MonoBehaviour
             UIController.Toast("駅同士が近すぎて接続できません(駅を少し離して建ててください)");
             return;
         }
+        // 間に別の駅がある区間を直結すると、道床がその駅のホームを貫通して描画される。
+        // 通過駅は系統側(FindPath)で表現できるので、線路自体は途中駅を経由して敷いてもらう
+        var blocker = new TrackSegment { a = a, b = st, signA = bestSa, signB = bestSb }
+            .FindStationCrossedByBed();
+        if (blocker != null)
+        {
+            UIController.Toast(blocker.stationName + "のホームを線路が貫いてしまいます。" +
+                blocker.stationName + "を経由して繋いでください(通過運転は系統側で設定できます)");
+            return;
+        }
         double cost = best * GameState.TrackCostPerM;
         if (!GameState.Spend(cost))
         {
