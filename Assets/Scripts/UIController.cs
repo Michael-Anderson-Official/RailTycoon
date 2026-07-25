@@ -946,6 +946,7 @@ public class UIController : MonoBehaviour
         infoStation = station;
         infoPanel.SetActive(true);
         RefreshInfoText();
+        RefreshOnboarding();   // 案内が情報パネルへ重ならないよう隠す
         ApplyResponsiveLayout();
     }
 
@@ -953,6 +954,7 @@ public class UIController : MonoBehaviour
     {
         infoStation = null;
         if (infoPanel != null) infoPanel.SetActive(false);
+        RefreshOnboarding();   // 情報パネルを閉じたら案内を戻す
         ApplyResponsiveLayout();
     }
 
@@ -1006,10 +1008,13 @@ public class UIController : MonoBehaviour
         onboardingTitle = Label("Title", panel.transform, "", 27,
             new Vector2(0f, 0.60f), Vector2.one, new Vector2(16f, 0f),
             new Vector2(-68f, -10f), TextAnchor.MiddleLeft);   // 右上の×ボタンぶん空ける
-        // 案内を閉じられるようにする。タップ領域は非退行ルールの54以上を確保する
-        Btn("Close", panel.transform, "×", 26,
+        // 案内を閉じられるようにする。タップ領域は非退行ルールの54以上を確保する。
+        // 背景色を既定(BtnBg)のままにするとパネル背景と同系色で埋もれて見えないため、
+        // 明るめの色を明示して「押せる」ことが分かるようにする
+        Btn("Close", panel.transform, "×", 30,
             new Vector2(1f, 1f), new Vector2(1f, 1f),
-            new Vector2(-62f, -60f), new Vector2(-8f, -6f), DismissOnboarding);
+            new Vector2(-64f, -62f), new Vector2(-10f, -8f), DismissOnboarding,
+            new Color(0.42f, 0.47f, 0.58f, 1f));
         onboardingBody = Label("Body", panel.transform, "", 20,
             new Vector2(0f, 0.28f), new Vector2(1f, 0.61f), new Vector2(16f, 0f),
             new Vector2(-16f, 0f), TextAnchor.MiddleLeft);
@@ -1024,7 +1029,11 @@ public class UIController : MonoBehaviour
     {
         if (onboardingPanel == null || BC == null) return;
         int stage = -1;
-        if (BC.mode == BuildController.Mode.View && (rig == null || rig.cabTrain == null))
+        // 駅情報パネル(名前変更などを含む下部シート)が出ている間は案内を隠す。
+        // 案内は画面下部の固定位置に出るため、重なって情報パネルのボタンを
+        // 押せなくなる(実機で駅名を変更できないという報告があった)
+        bool infoOpen = infoPanel != null && infoPanel.activeSelf;
+        if (BC.mode == BuildController.Mode.View && !infoOpen && (rig == null || rig.cabTrain == null))
         {
             if (TrackNetwork.stations.Count == 0) stage = 0;
             else if (TrackNetwork.stations.Count == 1) stage = 1;
