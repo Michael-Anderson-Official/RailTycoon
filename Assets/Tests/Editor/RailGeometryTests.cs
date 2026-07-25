@@ -276,6 +276,43 @@ public class RailGeometryTests
             "ホーム区間では走行経路が線路中心から外れないこと(ズレ" + maxDev.ToString("F2") + "m)");
     }
 
+    // ---- 渡り線の分岐形状 ----
+    // 直線の対角線で引くと、直進本線との付け根で線路が10°折れる。
+    // 実物のように両端が本線へ接するS字で開くこと
+
+    [Test]
+    public void CrossoverPath_LeavesAndJoinsMainTrackSmoothly()
+    {
+        Vector3 dir = Vector3.forward;
+        const float half = RailDimensions.MainTrackOffset, d = 13f;
+        var perp = Vector3.Cross(Vector3.up, dir).normalized;
+        var from = -perp * half - dir * d;
+        var to = perp * half + dir * d;
+
+        var curve = RailKit.CrossoverPath(from, to, dir);
+        Assert.That(curve.Count, Is.GreaterThan(4));
+
+        // 端点は本線上の分岐点と厳密に一致すること(ずれるとレールが途切れる)
+        Assert.That(Vector3.Distance(curve[0], from), Is.LessThan(0.01f));
+        Assert.That(Vector3.Distance(curve[curve.Count - 1], to), Is.LessThan(0.01f));
+
+        // 付け根で本線とほぼ同じ向きに出入りすること(直線対角線なら約10°折れる)
+        float angStart = Vector3.Angle((curve[1] - curve[0]).normalized, dir);
+        float angEnd = Vector3.Angle((curve[curve.Count - 1] - curve[curve.Count - 2]).normalized, dir);
+        float straightAngle = Vector3.Angle((to - from).normalized, dir);
+        Assert.That(angStart, Is.LessThan(3f), "分岐の入口が本線に接すること");
+        Assert.That(angEnd, Is.LessThan(3f), "分岐の出口が本線に接すること");
+        Assert.That(angStart, Is.LessThan(straightAngle * 0.5f),
+            "直線の対角線より明確に滑らかであること");
+
+        // 途中はちゃんと開いていること(まっすぐなだけでは渡り線にならない)
+        float maxAngle = 0f;
+        for (int i = 0; i + 1 < curve.Count; i++)
+            maxAngle = Mathf.Max(maxAngle, Vector3.Angle((curve[i + 1] - curve[i]).normalized, dir));
+        Assert.That(maxAngle, Is.GreaterThan(3f));
+        Assert.That(maxAngle, Is.LessThan(20f), "分岐角が急すぎないこと");
+    }
+
     // ---- 駅を建てる位置の当たり判定 ----
     // 既存の駅や既設の線路へ重ねて建てられてしまうと、ホームや道床がめり込んで描画される
 

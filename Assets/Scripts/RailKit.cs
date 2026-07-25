@@ -326,7 +326,10 @@ public static class RailKit
         if (dir.sqrMagnitude < 1e-4f) return;
         dir.Normalize();
         var perp = Vector3.Cross(Vector3.up, dir).normalized;
-        const float g = Gauge, ry = RailTop, half = 2.3f, d = 10f;
+        // 分岐長。リード区間(LeadLen=30m)に収まる範囲で長く取り、実物のように
+        // 緩い角度で開かせる(短いと急な折れ線に見える)
+        const float g = Gauge, ry = RailTop, d = 13f;
+        const float half = RailDimensions.MainTrackOffset;
         var up = Vector3.up;
 
         // バラスト
@@ -350,11 +353,13 @@ public static class RailKit
             AddBox(rail, tc + perp * g + up * ry, new Vector3(0.09f, 0.16f, (d + 4f) * 2f), rot);
             AddBox(rail, tc - perp * g + up * ry, new Vector3(0.09f, 0.16f, (d + 4f) * 2f), rot);
         }
-        // 交差する2本の渡り線 → 中央ダイヤモンドクロッシングX
+        // 交差する2本の渡り線 → 中央ダイヤモンドクロッシングX。
+        // 直線の対角線ではなく、両端が直進本線に接するS字(3次エルミート)にする。
+        // 直線だと分岐の付け根で線路が折れ、実物のように滑らかに開いていかない
         var A1 = center - perp * half - dir * d; var B1 = center + perp * half + dir * d;
         var A2 = center + perp * half - dir * d; var B2 = center - perp * half + dir * d;
-        DiagRail(rail, A1, B1, g, ry);
-        DiagRail(rail, A2, B2, g, ry);
+        CurvedRail(rail, CrossoverPath(A1, B1, dir), dir, g, ry);
+        CurvedRail(rail, CrossoverPath(A2, B2, dir), dir, g, ry);
         AddBox(metal, center + up * (ry - 0.02f), new Vector3(1.5f, 0.2f, 1.5f), rot);
         // 4分岐(転てつ機は本線の外側へ。左本線A1/B2は-perp、右本線A2/B1は+perp側)
         CrossPoint(metal, box, A1, dir, perp, -1, g, ry);
@@ -363,16 +368,32 @@ public static class RailKit
         CrossPoint(metal, box, B1, dir, perp, +1, g, ry);
     }
 
-    static void DiagRail(MeshData rail, Vector3 a, Vector3 b, float g, float ry)
+    // 渡り線1本の中心線。両端が直進本線と同じ向き(dir)で出入りするS字。
+    // 描画も、将来的に列車の通り道も、この同じ関数から得ることで形が食い違わない
+    public static List<Vector3> CrossoverPath(Vector3 from, Vector3 to, Vector3 dir, int n = 24)
     {
-        var dd = b - a; dd.y = 0; float len = dd.magnitude;
-        if (len < 0.1f) return;
-        dd /= len;
-        var pp = Vector3.Cross(Vector3.up, dd).normalized;
-        var rot = Quaternion.LookRotation(dd, Vector3.up);
-        var mid = (a + b) * 0.5f + Vector3.up * ry;
-        AddBox(rail, mid + pp * g, new Vector3(0.09f, 0.16f, len), rot);
-        AddBox(rail, mid - pp * g, new Vector3(0.09f, 0.16f, len), rot);
+        // 接線を弦長の0.62倍まで伸ばす。短いと分岐の付け根で急に曲がってしまい、
+        // 直線の対角線と大差ない折れ方に見える(HermitePathの既定0.35では足りない)
+        float mag = Vector3.Distance(from, to) * 0.45f;
+        Vector3 t = dir.normalized * mag;
+        var pts = new List<Vector3>(n + 1);
+        for (int i = 0; i <= n; i++)
+        {
+            float u = i / (float)n, uu = u * u, uuu = uu * u;
+            pts.Add((2f * uuu - 3f * uu + 1f) * from + (uuu - 2f * uu + u) * t
+                  + (-2f * uuu + 3f * uu) * to + (uuu - uu) * t);
+        }
+        return pts;
+    }
+
+    // 中心線に沿って2本のレールを敷く(AddTrackのレール部と同じ断面)。
+    // 端点の法線は近傍点からの近似ではなく本線の向き(dir)そのものを使う。
+    // 近似だと端の1区間ぶんの傾き(数度)ぶんレールが横へずれ、直進本線のレールとの
+    // 継ぎ目に隙間・折れが出る
+    static void CurvedRail(MeshData rail, List<Vector3> centre, Vector3 dir, float g, float ry)
+    {
+        AddSlab(rail, OffsetWithEndTangents(centre, g, dir, dir), 0.045f, ry, 0.16f);
+        AddSlab(rail, OffsetWithEndTangents(centre, -g, dir, dir), 0.045f, ry, 0.16f);
     }
 
     // 分岐1か所: トングレール(可動)・フログ・ガードレール・転てつ機。at=本線側の分岐点
