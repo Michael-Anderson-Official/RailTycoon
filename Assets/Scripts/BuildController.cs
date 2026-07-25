@@ -39,6 +39,17 @@ public class BuildController : MonoBehaviour
 
     Station trackFirst;
     GameObject trackMarker;
+    public TrackBedType pTrackBedType = TrackBedType.Ballast;
+
+    public static string TrackBedLabel(TrackBedType type)
+        => type == TrackBedType.Slab ? "スラブ軌道" : "バラスト軌道";
+
+    public void SetTrackBedType(TrackBedType type)
+    {
+        pTrackBedType = type;
+        if (UIController.I != null) UIController.I.RefreshTrackBedButtons();
+        UIController.Toast(TrackBedLabel(type) + "を選択");
+    }
 
     // 列車モードのサブ状態: 系統一覧/系統作成中/配車
     public enum TrainSub { Manage, CreateLine, Dispatch }
@@ -104,7 +115,7 @@ public class BuildController : MonoBehaviour
         selLines.Clear();
         mode = m;
         if (UIController.I != null) UIController.I.OnModeChanged();
-        if (m == Mode.Track) UIController.Toast("つなぎたい駅を2つ、順にタップ");
+        if (m == Mode.Track) UIController.Toast(TrackBedLabel(pTrackBedType) + "：つなぎたい駅を2つ、順にタップ");
         else if (m == Mode.Station) UIController.Toast("地面をタップして位置を選び、「ここに建設」で確定");
         else if (m == Mode.Train) UIController.Toast("運行系統を作るか、系統に列車を配置しましょう");
     }
@@ -358,14 +369,23 @@ public class BuildController : MonoBehaviour
             UIController.Toast("資金不足(" + (cost / 1e8).ToString("F1") + "億円必要)");
             return;
         }
-        var seg = new TrackSegment { id = ++TrackNetwork.segmentIdCounter, a = a, b = st, signA = bestSa, signB = bestSb };
+        var seg = new TrackSegment
+        {
+            id = ++TrackNetwork.segmentIdCounter,
+            a = a,
+            b = st,
+            signA = bestSa,
+            signB = bestSb,
+            bedType = pTrackBedType,
+        };
         seg.Build(WorldRoot);
         TrackNetwork.segments.Add(seg);
         a.RebuildTrackVisual();     // 接続した端を貫通(車止め除去)に
         st.RebuildTrackVisual();
         TrackNetwork.MarkDirty();
         SaveLoad.Save();
-        UIController.Toast(a.stationName + "〜" + st.stationName + " 線路敷設(" + (cost / 1e8).ToString("F1") + "億円)");
+        UIController.Toast(a.stationName + "〜" + st.stationName + " " + TrackBedLabel(seg.bedType)
+            + "敷設(" + (cost / 1e8).ToString("F1") + "億円)");
     }
 
     void ClearTrackSel()

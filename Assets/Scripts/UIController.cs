@@ -18,7 +18,7 @@ public class UIController : MonoBehaviour
     Text carsVal, facesVal, linesVal, stationTitle, confirmBtnLabel;
     Station infoStation;
     float removeArmedUntil;
-    GameObject stationPanel, trainPanel, infoPanel, toastBg, platformRow, renameModal, edgePanel;
+    GameObject trackPanel, stationPanel, trainPanel, infoPanel, toastBg, platformRow, renameModal, edgePanel;
     RectTransform edgeRows;
     InputField renameInput;
     // 列車パネル(タブ制): 系統をつくる / 列車を配置
@@ -29,6 +29,7 @@ public class UIController : MonoBehaviour
     Image tabServiceBtn, tabDispatchBtn;
     Image[] typeBtns;
     readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
+    readonly Dictionary<TrackBedType, Image> trackBedBtns = new Dictionary<TrackBedType, Image>();
     readonly List<KeyValuePair<TrainCatalog.Formation, Image>> fmBtns = new List<KeyValuePair<TrainCatalog.Formation, Image>>();
     readonly List<KeyValuePair<float, Image>> speedBtns = new List<KeyValuePair<float, Image>>();
     float toastUntil;
@@ -54,6 +55,7 @@ public class UIController : MonoBehaviour
 
         BuildTopBar();
         BuildToolbar();
+        BuildTrackPanel();
         BuildStationPanel();
         BuildTrainPanel();
         BuildInfoPanel();
@@ -186,6 +188,40 @@ public class UIController : MonoBehaviour
         cabBtn.color = BtnActive;
         Toast("前面展望: " + trains[cabIdx].fm.Label +
             (trains.Length > 1 ? "(もう一度タップで次の列車、" : "(") + "「見る」で戻る)");
+    }
+
+    void BuildTrackPanel()
+    {
+        var p = Panel("TrackPanel", transform, new Vector2(0, 0.5f), new Vector2(0, 0.5f),
+            Vector2.zero, Vector2.zero, PanelBg);
+        var rt = p.rectTransform;
+        rt.pivot = new Vector2(0, 0.5f);
+        rt.anchoredPosition = new Vector2(8, 40);
+        rt.sizeDelta = new Vector2(330, 250);
+        trackPanel = p.gameObject;
+
+        Label("Title", p.transform, "線路構造", 30, new Vector2(0, 1), new Vector2(1, 1),
+            new Vector2(14, -58), new Vector2(-14, -14), TextAnchor.MiddleLeft);
+
+        var ballast = Btn("Ballast", p.transform, "バラスト軌道", 25,
+            new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -120), new Vector2(-14, -66),
+            () => BC.SetTrackBedType(TrackBedType.Ballast));
+        var slab = Btn("Slab", p.transform, "スラブ軌道", 25,
+            new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -182), new Vector2(-14, -128),
+            () => BC.SetTrackBedType(TrackBedType.Slab));
+        trackBedBtns[TrackBedType.Ballast] = ballast;
+        trackBedBtns[TrackBedType.Slab] = slab;
+
+        Label("Hint", p.transform, "種類を選び、駅を2つ順にタップ", 20,
+            new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -232), new Vector2(-14, -194),
+            TextAnchor.MiddleLeft);
+    }
+
+    public void RefreshTrackBedButtons()
+    {
+        if (BC == null) return;
+        foreach (var kv in trackBedBtns)
+            kv.Value.color = kv.Key == BC.pTrackBedType ? BtnActive : BtnBg;
     }
 
     void BuildStationPanel()
@@ -728,8 +764,10 @@ public class UIController : MonoBehaviour
         if (cabBtn != null) cabBtn.color = BtnBg;
         var mode = BC.mode;
         foreach (var kv in modeBtns) kv.Value.color = kv.Key == mode ? BtnActive : BtnBg;
+        trackPanel.SetActive(mode == BuildController.Mode.Track);
         stationPanel.SetActive(mode == BuildController.Mode.Station);
         trainPanel.SetActive(mode == BuildController.Mode.Train);
+        if (mode == BuildController.Mode.Track) RefreshTrackBedButtons();
         if (mode == BuildController.Mode.Train) RefreshTrainPanel();
         if (mode != BuildController.Mode.View) HideStationInfo();
         UpdateRouteLabel();

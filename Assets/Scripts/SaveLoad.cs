@@ -93,6 +93,9 @@ public static class SaveLoad
     {
         public int id;               // 0=不正値
         public int aId, bId, sa, sb;
+        // v4への後方互換な追加フィールド。旧JSONでは欠落=0=Ballastとなるため、
+        // schema versionを上げずに従来線路をそのまま復元できる。
+        public int bedType;
     }
 
     [Serializable]
@@ -305,7 +308,15 @@ public static class SaveLoad
         foreach (var g in TrackNetwork.segments)
         {
             if (g.id == 0 || g.a.id == 0 || g.b.id == 0) continue;
-            segList.Add(new SegDataV2 { id = g.id, aId = g.a.id, bId = g.b.id, sa = g.signA, sb = g.signB });
+            segList.Add(new SegDataV2
+            {
+                id = g.id,
+                aId = g.a.id,
+                bId = g.b.id,
+                sa = g.signA,
+                sb = g.signB,
+                bedType = (int)g.bedType,
+            });
         }
         d.seg = segList.ToArray();
 
@@ -855,6 +866,8 @@ public static class SaveLoad
             if (gd.aId == gd.bId) { error = "segmentの端点が同一駅: " + gd.id; return false; }
             if (gd.sa != 1 && gd.sa != -1) { error = "segment signA不正: " + gd.id; return false; }
             if (gd.sb != 1 && gd.sb != -1) { error = "segment signB不正: " + gd.id; return false; }
+            if (gd.bedType < (int)TrackBedType.Ballast || gd.bedType > (int)TrackBedType.Slab)
+            { error = "segment bedType不正: " + gd.id; return false; }
             long key = gd.aId < gd.bId ? ((long)gd.aId << 32) | (uint)gd.bId : ((long)gd.bId << 32) | (uint)gd.aId;
             if (!segEndpoints.Add(key)) { error = "同一駅間に重複線路: " + gd.aId + "-" + gd.bId; return false; }
             if (gd.id > maxSegId) maxSegId = gd.id;
@@ -1134,7 +1147,15 @@ public static class SaveLoad
             var segById = new Dictionary<int, TrackSegment>();
             foreach (var gd in d.seg)
             {
-                var seg = new TrackSegment { id = gd.id, a = stById[gd.aId], b = stById[gd.bId], signA = gd.sa, signB = gd.sb };
+                var seg = new TrackSegment
+                {
+                    id = gd.id,
+                    a = stById[gd.aId],
+                    b = stById[gd.bId],
+                    signA = gd.sa,
+                    signB = gd.sb,
+                    bedType = (TrackBedType)gd.bedType,
+                };
                 seg.Build(stagingRoot.transform);
                 stagedSegments.Add(seg);
                 segById[gd.id] = seg;

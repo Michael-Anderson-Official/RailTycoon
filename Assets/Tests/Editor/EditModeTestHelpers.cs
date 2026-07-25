@@ -22,7 +22,7 @@ public static class EditModeTestHelpers
     }
 
     // 両駅のスロート端同士のうち最短の組み合わせで結ぶ(既存テスト群と同一ロジック)
-    public static TrackSegment Connect(Station a, Station b)
+    public static TrackSegment Connect(Station a, Station b, TrackBedType bedType = TrackBedType.Ballast)
     {
         int bestSa = 1, bestSb = 1;
         float best = float.MaxValue;
@@ -32,7 +32,15 @@ public static class EditModeTestHelpers
                 float d = Vector3.Distance(a.End(sa), b.End(sb));
                 if (d < best) { best = d; bestSa = sa; bestSb = sb; }
             }
-        var seg = new TrackSegment { id = ++TrackNetwork.segmentIdCounter, a = a, b = b, signA = bestSa, signB = bestSb };
+        var seg = new TrackSegment
+        {
+            id = ++TrackNetwork.segmentIdCounter,
+            a = a,
+            b = b,
+            signA = bestSa,
+            signB = bestSb,
+            bedType = bedType,
+        };
         seg.Build(BuildController.WorldRoot);
         TrackNetwork.segments.Add(seg);
         return seg;

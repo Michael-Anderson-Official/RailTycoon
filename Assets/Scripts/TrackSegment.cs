@@ -1,12 +1,21 @@
 using System.Collections.Generic;
 using UnityEngine;
 
+// 線路構造。値はセーブデータへそのまま保存するため固定する。
+// 既存セーブでフィールドが欠落した場合は0=Ballastとなり、従来の見た目を維持する。
+public enum TrackBedType
+{
+    Ballast = 0,
+    Slab = 1,
+}
+
 // 駅間を結ぶ複線区間。両駅のスロート収束点(End)同士を直線で結ぶ
 public class TrackSegment
 {
     public int id; // M2-C: セーブ/ロードを跨いで安定な識別子。0は未割当
     public Station a, b;
     public int signA, signB;  // 各駅のどちらの端に接続するか(±1)
+    public TrackBedType bedType = TrackBedType.Ballast;
     public GameObject go;
     public float length;
 
@@ -51,22 +60,30 @@ public class TrackSegment
         }
         go = new GameObject("Track_" + a.stationName + "_" + b.stationName);
         go.transform.SetParent(parent, false);
-        var ballast = new RailKit.MeshData();
+        var bed = new RailKit.MeshData();
         var rail = new RailKit.MeshData();
-        var tie = new RailKit.MeshData();
+        var support = new RailKit.MeshData();
+        var detail = new RailKit.MeshData();
         var center = CenterPoints();
         // 端点の法線は近傍点からの近似(NormalAt)ではなく、駅の発着方向そのもの
         // (CenterPointsのエルミート曲線に渡したのと同じ接線)を使い、駅の自前スロートの
         // 線路と隙間なく繋がるようにする
         Vector3 tan0 = a.Axis * signA, tan1 = -(b.Axis * signB);
-        RailKit.AddTrack(ballast, rail, tie, RailKit.OffsetWithEndTangents(center, 2.3f, tan0, tan1));
-        RailKit.AddTrack(ballast, rail, tie, RailKit.OffsetWithEndTangents(center, -2.3f, tan0, tan1));
+        RailKit.AddTrack(bed, rail, support,
+            RailKit.OffsetWithEndTangents(center, 2.3f, tan0, tan1), bedType, detail);
+        RailKit.AddTrack(bed, rail, support,
+            RailKit.OffsetWithEndTangents(center, -2.3f, tan0, tan1), bedType, detail);
 
         // 渡り線は駅前(スロートのリード)に駅側で描く。segmentには描かない
         length = Vector3.Distance(EndA, EndB);
-        RailKit.MeshGO("Ballast", ballast.ToMesh(), MatLib.Get("Ballast"), go.transform);
+        bool slab = bedType == TrackBedType.Slab;
+        RailKit.MeshGO(slab ? "Slab" : "Ballast", bed.ToMesh(),
+            MatLib.Get(slab ? "StationHouse" : "Ballast"), go.transform);
         RailKit.MeshGO("Rail", rail.ToMesh(), MatLib.Get("Rail"), go.transform);
-        RailKit.MeshGO("Tie", tie.ToMesh(), MatLib.Get("Tie"), go.transform);
+        RailKit.MeshGO(slab ? "SlabSupport" : "Tie", support.ToMesh(),
+            MatLib.Get(slab ? "Platform" : "Tie"), go.transform);
+        if (detail.v.Count > 0)
+            RailKit.MeshGO("SlabDetail", detail.ToMesh(), MatLib.Get("Switch"), go.transform);
     }
 
     // A端→B端の中心線。両駅それぞれの発着方向(Axis*sign)へ、実際の鉄道のように

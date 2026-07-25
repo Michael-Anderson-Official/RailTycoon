@@ -35,12 +35,22 @@ public static class TrackTest
         // 近接ペア(スロート端同士が50m未満)の再現
         var c = MakeStation(new Vector3(-400, 0, 260), 0, 6, 2, 2, "C");
         Physics.SyncTransforms();
+        bc.SetTrackBedType(TrackBedType.Slab);
         bc.HandleTap(RayAt(a.transform.position));
         bc.HandleTap(RayAt(c.transform.position));
-        Debug.Log("TrackTest: after A-C(close) segments=" + TrackNetwork.segments.Count);
+        bool bedTypesOk = TrackNetwork.segments.Count == 2
+            && TrackNetwork.segments[0].bedType == TrackBedType.Ballast
+            && TrackNetwork.segments[1].bedType == TrackBedType.Slab;
+        Debug.Log("TrackTest: after A-C(close) segments=" + TrackNetwork.segments.Count
+            + " bedTypesOk=" + bedTypesOk);
 
         // 地面タップ(駅なし)の挙動
         bc.HandleTap(RayAt(new Vector3(1500, 0, 1500)));
+        if (!bedTypesOk)
+        {
+            Debug.LogError("TrackTest: FAIL track bed type selection");
+            EditorApplication.Exit(1);
+        }
         Debug.Log("TrackTest: done");
         EditorApplication.Exit(0);
     }

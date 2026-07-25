@@ -20,8 +20,8 @@ public static class Snapshot
         var stB = MakeStation(new Vector3(350, 0, 180), -25f, 6, 2, 2, "本町");
         var stC = MakeStation(new Vector3(1000, 0, -420), 55f, 4, 1, 2, "緑ヶ丘");
 
-        var segAB = Connect(stA, stB);
-        var segBC = Connect(stB, stC);
+        var segAB = Connect(stA, stB, TrackBedType.Ballast);
+        var segBC = Connect(stB, stC, TrackBedType.Slab);
 
         stA.ForceDev(6);
         stB.ForceDev(3);
@@ -41,6 +41,8 @@ public static class Snapshot
         Shot(outDir, "station_c.png", stC.transform.position, 250f, 30f, 20f);
         Shot(outDir, "train_running.png", TrainPos, 140f, 18f, 150f);
         Shot(outDir, "throat.png", stA.End(1), 150f, 28f, 190f);
+        TrackBedShot(outDir, "track_ballast.png", segAB);
+        TrackBedShot(outDir, "track_slab.png", segBC);
 
         Debug.Log("Snapshot: done");
         EditorApplication.Exit(0);
@@ -63,7 +65,7 @@ public static class Snapshot
         return st;
     }
 
-    static TrackSegment Connect(Station a, Station b)
+    static TrackSegment Connect(Station a, Station b, TrackBedType bedType)
     {
         int bestSa = 1, bestSb = 1;
         float best = float.MaxValue;
@@ -73,7 +75,7 @@ public static class Snapshot
                 float d = Vector3.Distance(a.End(sa), b.End(sb));
                 if (d < best) { best = d; bestSa = sa; bestSb = sb; }
             }
-        var seg = new TrackSegment { a = a, b = b, signA = bestSa, signB = bestSb };
+        var seg = new TrackSegment { a = a, b = b, signA = bestSa, signB = bestSb, bedType = bedType };
         seg.Build(BuildController.WorldRoot);
         TrackNetwork.segments.Add(seg);
         return seg;
@@ -133,5 +135,15 @@ public static class Snapshot
         Object.DestroyImmediate(rt);
         Object.DestroyImmediate(camGo);
         Debug.Log("Snapshot: wrote " + name);
+    }
+
+    static void TrackBedShot(string dir, string name, TrackSegment seg)
+    {
+        var pts = seg.CenterPoints();
+        int mid = pts.Count / 2;
+        Vector3 dirAlong = pts[Mathf.Min(mid + 1, pts.Count - 1)] - pts[Mathf.Max(0, mid - 1)];
+        float lineYaw = Mathf.Atan2(dirAlong.x, dirAlong.z) * Mathf.Rad2Deg;
+        // 線路を斜め横から見て、床版/バラスト肩と支持構造の両方が読める近景。
+        Shot(dir, name, pts[mid], 34f, 16f, lineYaw + 68f);
     }
 }
