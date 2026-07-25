@@ -17,7 +17,7 @@ Unityエディタ本体: `C:\Program Files\Unity\Hub\Editor\6000.3.20f1\Editor\U
 ```
 Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults "Logs/edittest.xml" -logFile "Logs/edittest.log"
 ```
-   結果は`Logs/edittest.xml`の`<test-run ... failed="0" ...>`で確認する(現在118件PASS
+   結果は`Logs/edittest.xml`の`<test-run ... failed="0" ...>`で確認する(現在125件PASS
    +1件Ignore)。
 2. レガシーバッチも合わせて実行する(NUnit化される前からある手動チェック。
    Debug.Logで"PASS"/"done"を出し、失敗時は非ゼロ終了):
@@ -34,6 +34,13 @@ Unity.exe -batchmode -nographics -projectPath . -executeMethod BlockTest.Run -lo
    「技術的変更」(型・内部構造等)を分けて明記する。型変更等があった場合、
    「変更なし」とだけ書かず具体的に書く(過去に「意図的に変更した挙動: なし」とだけ
    書いて指摘を受けた経緯あり)。
+
+## デフォルト公開方針(ユーザー承認済み)
+
+コード変更タスクは、必要なテストとCodexレビューが成功したら追加確認を挟まず
+`origin/master`へpushし、続けてWebGLを再ビルドして`gh-pages`へデプロイする。
+リモート先行・分岐、テスト失敗、ビルド失敗、秘密情報や意図しないファイルの混入を
+検出した場合だけ公開を止めて報告する。下記の安全手順とforce push禁止は常に守る。
 
 ## GitHub push(origin/master)の安全手順
 
@@ -104,6 +111,8 @@ git push https://github.com/Michael-Anderson-Official/RailTycoon.git master:gh-p
 
 ## 直近の変更(このセッションでの作業、新しい順)
 
+- 駅ホームを多層化し、上屋・点字ブロック・駅名標・ベンチ・駅舎ガラス等を追加
+- 線路建設時にバラスト軌道／スラブ軌道を選択可能化、セーブデータにも保存
 - 系統作成に駅検索UI追加＋通過駅(スキップストップ)対応(FindPath/BuildMultiLeg/
   SaveLoad v4)
 - 駅間カーブをPI法(接線交点)による滑らかな線形に変更、継ぎ目の隙間解消
