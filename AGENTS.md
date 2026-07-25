@@ -121,6 +121,29 @@ git push https://github.com/Michael-Anderson-Official/RailTycoon.git master:gh-p
 `3113829`も追加レビューで指摘なし。これらより前のコミット群(台車追従修正〜
 通過駅対応)は、履歴単位のレビューとしては未実施。
 
+## Codexレビューの実行方法(この環境での注意)
+
+`--scope branch`は**この環境では動かない**。Codexのサンドボックスが`git diff`用の
+pwshを起動できず(`CreateProcessAsUserW failed: 5 アクセスが拒否されました`)、
+`Starting Codex review thread`のまま10分以上進まない。
+
+動くのは`--scope working-tree`のみ。既にコミット済みの変更をレビューしたい場合は、
+その差分を一時ブランチ上で未コミット状態として再現してから掛ける:
+
+```bash
+git checkout -b review-tmp <レビュー基点>
+git checkout <レビュー対象> -- <対象ファイル…>   # 差分が未コミットの状態になる
+node ".../codex-companion.mjs" review --scope working-tree > Logs/review.txt 2>&1
+git checkout -- Assets/ && git checkout master && git branch -D review-tmp
+```
+
+その他:
+- 出力を`| tail`へ通すと終了まで何も見えない。ファイルへリダイレクトすること
+- ラッパーがkillされても`codex.exe`は孤児として残り、再試行のたびに積み上がって
+  空きメモリ(この環境は1〜2GB)を圧迫する。中断したら
+  `Get-Process codex | Where-Object {$_.WorkingSet64 -gt 50MB} | Stop-Process -Force`
+  で掃除してから再試行する
+
 ## アーキテクチャ早見表
 
 - `Train.cs`: 列車の状態機械(Dwell/Run)、発着処理(`TryDepart`/`Arrive`)、経路構築
