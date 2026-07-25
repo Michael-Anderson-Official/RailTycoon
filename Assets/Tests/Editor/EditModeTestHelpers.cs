@@ -5,7 +5,8 @@ using UnityEngine;
 // NUnitテストから再利用できる形にしたもの。
 public static class EditModeTestHelpers
 {
-    public static Station MakeStation(Vector3 pos, float yaw, int cars, int faces, int lines, string name)
+    public static Station MakeStation(Vector3 pos, float yaw, int cars, int faces, int lines, string name,
+        int level = 0)
     {
         var go = new GameObject(name);
         go.transform.SetParent(BuildController.WorldRoot, false);
@@ -15,6 +16,7 @@ public static class EditModeTestHelpers
         st.cars = cars;
         st.faces = faces;
         st.lines = lines;
+        st.level = level;   // Build()内で位置のYが階に合わせて確定する
         st.stationName = name;
         st.Build();
         TrackNetwork.stations.Add(st);

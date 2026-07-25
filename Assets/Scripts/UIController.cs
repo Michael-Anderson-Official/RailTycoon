@@ -16,7 +16,7 @@ public class UIController : MonoBehaviour
 #endif
 
     Text moneyText, clockText, carriedText, toastText, costText, routeText, infoText;
-    Text carsVal, facesVal, linesVal, stationTitle, confirmBtnLabel, trackHintText, pauseLabel;
+    Text carsVal, facesVal, linesVal, levelVal, stationTitle, confirmBtnLabel, trackHintText, pauseLabel;
     Text onboardingTitle, onboardingBody, onboardingButtonLabel;
     Station infoStation;
 
@@ -50,6 +50,13 @@ public class UIController : MonoBehaviour
     public const float PortraitTopHeight = 154f;
     public const float LandscapeTopHeight = 104f;
     public const float PortraitToolbarHeight = 112f;
+    // 縦画面の各シートの高さ(CanvasScalerの参照単位。端末pxではない)。
+    // 端末に収まるかはUiLayoutTests.PortraitSheets_FitInsideTheSafeAreaで守る
+    public const float StationPanelPortraitHeight = 823f;
+    public const float TrainPanelPortraitHeight = 1110f;
+    public const float InfoPanelPortraitHeight = 570f;
+    public const float TrackPanelPortraitHeight = 330f;
+    public static readonly Vector2 ReferenceResolution = new Vector2(1000f, 1600f);
     public const float LandscapeToolbarHeight = 96f;
     public const float MinimumPrimaryButtonHeight = 54f;
 
@@ -73,7 +80,7 @@ public class UIController : MonoBehaviour
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         var scaler = gameObject.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1000f, 1600f);
+        scaler.referenceResolution = ReferenceResolution;
         scaler.matchWidthOrHeight = 0.5f;
         gameObject.AddComponent<GraphicRaycaster>();
 
@@ -453,6 +460,8 @@ public class UIController : MonoBehaviour
             () => ChangeFaces(-1), () => ChangeFaces(1));
         linesVal = ParamRow(panel.transform, "線路本数", ref y,
             () => ChangeLines(-1), () => ChangeLines(1));
+        levelVal = ParamRow(panel.transform, "高さ", ref y,
+            () => ChangeLevel(-1), () => ChangeLevel(1));
         Btn("Yaw", panel.transform, "駅の向きを45°回転", 24,
             new Vector2(0f, 1f), Vector2.one, new Vector2(16f, y - 56f),
             new Vector2(-16f, y), RotatePreview);
@@ -512,6 +521,16 @@ public class UIController : MonoBehaviour
         RefreshStationPanel();
     }
 
+    void ChangeLevel(int delta)
+    {
+        BC.pLevel = Mathf.Clamp(BC.pLevel + delta, 0, 3);
+        BC.ApplyPreviewParams();
+        RefreshStationPanel();
+    }
+
+    public static string LevelLabel(int level)
+        => level == 0 ? "地上" : (level + 1) + "階";
+
     void RotatePreview()
     {
         BC.pYaw = Mathf.Repeat(BC.pYaw + 45f, 360f);
@@ -524,6 +543,7 @@ public class UIController : MonoBehaviour
         carsVal.text = BC.pCars + "両";
         facesVal.text = BC.pFaces + "面";
         linesVal.text = BC.pLines + "線";
+        levelVal.text = LevelLabel(BC.pLevel);
         for (int i = 0; i < stationPresetBtns.Count; i++)
         {
             var preset = BuildController.StationPresets[i];
@@ -531,14 +551,15 @@ public class UIController : MonoBehaviour
                 ? BtnSelected : BtnBg;
         }
 
-        double newCost = GameState.StationCost(BC.pCars, BC.pFaces, BC.pLines);
+        double newCost = GameState.StationCost(BC.pCars, BC.pFaces, BC.pLines, BC.pLevel);
         bool affordable;
         if (BC.rebuildTarget != null)
         {
             stationTitle.text = "駅を建て替える";
             confirmBtnLabel.text = "建て替え確定";
             double delta = newCost - GameState.StationCost(
-                BC.rebuildTarget.cars, BC.rebuildTarget.faces, BC.rebuildTarget.lines);
+                BC.rebuildTarget.cars, BC.rebuildTarget.faces, BC.rebuildTarget.lines,
+                BC.rebuildTarget.level);
             affordable = delta <= 0 || GameState.money >= delta;
             costText.text = delta > 0 ? "追加費用　" + (delta / 1e8).ToString("F1") + "億円"
                 : delta < 0 ? "払戻　" + (-delta * 0.5 / 1e8).ToString("F1") + "億円"
@@ -929,7 +950,7 @@ public class UIController : MonoBehaviour
         if (infoStation == null || infoText == null) return;
         infoText.text = infoStation.stationName + "\n" +
             infoStation.cars + "両対応　" + infoStation.faces + "面" +
-            infoStation.lines + "線\n" +
+            infoStation.lines + "線　" + LevelLabel(infoStation.level) + "\n" +
             "待ち客　" + infoStation.TotalWaiting + " / " + infoStation.WaitingCap + "人\n" +
             "発展レベル　" + infoStation.DevLevel + "　　接続駅　" +
             TrackNetwork.Reachable(infoStation).Count + "駅";
@@ -1442,10 +1463,10 @@ public class UIController : MonoBehaviour
         float bottom = portrait ? PortraitToolbarHeight : LandscapeToolbarHeight;
         SetBar(topBarRt, true, top);
         SetBar(toolbarRt, false, bottom);
-        SetSheet(trackPanelRt, portrait, 330f, 410f, false, top, bottom);
-        SetSheet(stationPanelRt, portrait, 760f, 430f, false, top, bottom);
-        SetSheet(trainPanelRt, portrait, 1110f, 490f, true, top, bottom);
-        SetSheet(infoPanelRt, portrait, 570f, 520f, true, top, bottom);
+        SetSheet(trackPanelRt, portrait, TrackPanelPortraitHeight, 410f, false, top, bottom);
+        SetSheet(stationPanelRt, portrait, StationPanelPortraitHeight, 430f, false, top, bottom);
+        SetSheet(trainPanelRt, portrait, TrainPanelPortraitHeight, 490f, true, top, bottom);
+        SetSheet(infoPanelRt, portrait, InfoPanelPortraitHeight, 520f, true, top, bottom);
 
         toastRt.anchorMin = new Vector2(0.05f, 0f);
         toastRt.anchorMax = new Vector2(0.95f, 0f);

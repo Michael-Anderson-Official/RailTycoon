@@ -29,6 +29,22 @@ public static class RailDimensions
     // 駅構内はホーム面との間へ保守用の細い排水隙間を残すため、駅間より道床肩を絞る。
     public const float StationBedHalfWidth = 1.34f;
 
+    // ---- 階層(高架) ----
+    // 高さは連続値ではなく「階」で持つ。0=地上、1=2階、2=3階…。
+    // 将来の地下は負の値で表せるよう、計算は符号を選ばない形にしておく
+    public const float FloorHeight = 8f;              // 1階ぶん(道路上空を抜ける高さ)
+    public const float ViaductDeckThickness = 1.2f;   // 桁の厚み
+    public const float ViaductPierWidth = 1.6f;       // 橋脚の一辺
+    public const float ViaductPierSpacing = 25f;      // 橋脚の間隔
+    public static float HeightOfLevel(int level) => level * FloorHeight;
+
+    // これ以上の高低差があれば、平面が重なっていても干渉しない(立体交差)とみなす
+    public const float LevelClearance = 4f;
+
+    // 勾配の上限(実際の鉄道に近い35‰)。駅間の縦断は両端の勾配を0にするS字なので、
+    // 最大勾配は平均勾配の1.5倍になる。必要な水平距離は 1.5*Δh/MaxGrade
+    public const float MaxGrade = 0.035f;
+
     // 複線の線路中心どうしの間隔の半分(=中心線から各線までの距離)。
     // 駅のスロート収束点・駅間の左右線・渡り線が全てこの値を共有する。
     // 個別に書くと渡り線だけ位置がずれる等の不整合が起きるため、ここを唯一の基準にする

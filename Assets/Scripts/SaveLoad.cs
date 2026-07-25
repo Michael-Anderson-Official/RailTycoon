@@ -256,10 +256,42 @@ public static class SaveLoad
         public LnDataV2[] ln;
     }
 
+    // v5で駅に階(level)が加わった。増えたのは駅だけなので、seg/tr/lnはv4の型を流用する
+    [Serializable]
+    public class StDataV4
+    {
+        public int id;
+        public float x, z, yaw;
+        public int cars, faces, lines;
+        public string name;
+        public float dev;
+        public double spawnAcc;
+        public int[] waitToId;
+        public int[] waitN;
+        public PlatformEdgeOverrideData[] edgeOverrides;
+        public int level;           // 0=地上。v4以前からのmigrationでは常に0
+    }
+
+    [Serializable]
+    public class GameDataV5
+    {
+        public int v = 5;
+        public double money;
+        public long carried;
+        public float minutes, speed;
+        public uint randomState;
+        public int nameCounter;
+        public int stationIdCounter, segmentIdCounter, trainIdCounter, lineIdCounter;
+        public StDataV4[] st;
+        public SegDataV2[] seg;
+        public TrDataV3[] tr;
+        public LnDataV2[] ln;
+    }
+
     public static void Save()
     {
         if (suppress) return;
-        var d = new GameDataV4
+        var d = new GameDataV5
         {
             money = GameState.money,
             carried = GameState.carried,
@@ -273,16 +305,17 @@ public static class SaveLoad
             lineIdCounter = Services.idCounter,
         };
 
-        var stList = new List<StDataV3>();
+        var stList = new List<StDataV4>();
         foreach (var s in TrackNetwork.stations)
         {
             if (s.id == 0) continue; // preview等、未割当IDの駅は保存しない
-            var sd = new StDataV3
+            var sd = new StDataV4
             {
                 id = s.id,
                 x = s.transform.position.x,
                 z = s.transform.position.z,
                 yaw = s.transform.eulerAngles.y,
+                level = s.level,
                 cars = s.cars, faces = s.faces, lines = s.lines,
                 name = s.stationName,
                 dev = s.dev,
@@ -457,7 +490,7 @@ public static class SaveLoad
         catch (Exception e) { Debug.LogError("SaveLoad: version probe failed: " + e.Message); return false; }
         if (probe == null) return false;
 
-        GameDataV4 v4;
+        GameDataV5 v5;
         bool migrated;
         if (probe.v == 1)
         {
@@ -465,7 +498,7 @@ public static class SaveLoad
             try { v1 = JsonUtility.FromJson<GameData>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v1 parse failed: " + e.Message); return false; }
             if (v1 == null || v1.st == null || v1.st.Count == 0) return false;
-            v4 = MigrateV3ToV4(MigrateV2ToV3(MigrateV1ToV2(v1)));
+            v5 = MigrateV4ToV5(MigrateV3ToV4(MigrateV2ToV3(MigrateV1ToV2(v1))));
             migrated = true;
         }
         else if (probe.v == 2)
@@ -474,7 +507,7 @@ public static class SaveLoad
             try { v2 = JsonUtility.FromJson<GameDataV2>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v2 parse failed: " + e.Message); return false; }
             if (v2 == null || v2.st == null || v2.st.Length == 0) return false;
-            v4 = MigrateV3ToV4(MigrateV2ToV3(v2));
+            v5 = MigrateV4ToV5(MigrateV3ToV4(MigrateV2ToV3(v2)));
             migrated = true;
         }
         else if (probe.v == 3)
@@ -483,13 +516,22 @@ public static class SaveLoad
             try { v3 = JsonUtility.FromJson<GameDataV3>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v3 parse failed: " + e.Message); return false; }
             if (v3 == null || v3.st == null || v3.st.Length == 0) return false;
-            v4 = MigrateV3ToV4(v3);
+            v5 = MigrateV4ToV5(MigrateV3ToV4(v3));
             migrated = true;
         }
         else if (probe.v == 4)
         {
+            GameDataV4 v4;
             try { v4 = JsonUtility.FromJson<GameDataV4>(json); }
             catch (Exception e) { Debug.LogError("SaveLoad: v4 parse failed: " + e.Message); return false; }
+            if (v4 == null || v4.st == null || v4.st.Length == 0) return false;
+            v5 = MigrateV4ToV5(v4);
+            migrated = true;
+        }
+        else if (probe.v == 5)
+        {
+            try { v5 = JsonUtility.FromJson<GameDataV5>(json); }
+            catch (Exception e) { Debug.LogError("SaveLoad: v5 parse failed: " + e.Message); return false; }
             migrated = false;
         }
         else
@@ -497,22 +539,52 @@ public static class SaveLoad
             Debug.LogError("SaveLoad: unsupported version " + probe.v + " (0=欠落, 未来versionは非対応)");
             return false;
         }
-        if (v4 == null || v4.st == null || v4.st.Length == 0) return false;
+        if (v5 == null || v5.st == null || v5.st.Length == 0) return false;
 
         string error;
-        if (!Validate(v4, out error))
+        if (!Validate(v5, out error))
         {
             Debug.LogError("SaveLoad: validation failed: " + error);
             return false;
         }
 
-        if (!ApplyToWorld(v4, out error))
+        if (!ApplyToWorld(v5, out error))
         {
             Debug.LogError("SaveLoad: apply failed: " + error);
             return false;
         }
-        if (migrated) Debug.Log("SaveLoad: 旧セーブをv4へ正規化して読み込みました(次回保存時にv4として書き戻ります)");
+        if (migrated) Debug.Log("SaveLoad: 旧セーブをv5へ正規化して読み込みました(次回保存時にv5として書き戻ります)");
         return true;
+    }
+
+    // v4(駅の階が存在しない)をv5形式へ正規化する。全ての駅を地上(level=0)とする。
+    // v4の時点で駅は地上にしか建てられなかったので、既存挙動と完全に一致する
+    static GameDataV5 MigrateV4ToV5(GameDataV4 v4)
+    {
+        var d = new GameDataV5
+        {
+            money = v4.money, carried = v4.carried, minutes = v4.minutes, speed = v4.speed,
+            randomState = v4.randomState, nameCounter = v4.nameCounter,
+            stationIdCounter = v4.stationIdCounter, segmentIdCounter = v4.segmentIdCounter,
+            trainIdCounter = v4.trainIdCounter, lineIdCounter = v4.lineIdCounter,
+            seg = v4.seg, tr = v4.tr, ln = v4.ln,
+        };
+        var srcSt = v4.st ?? new StDataV3[0];
+        var stList = new StDataV4[srcSt.Length];
+        for (int i = 0; i < srcSt.Length; i++)
+        {
+            var s = srcSt[i];
+            stList[i] = new StDataV4
+            {
+                id = s.id, x = s.x, z = s.z, yaw = s.yaw,
+                cars = s.cars, faces = s.faces, lines = s.lines,
+                name = s.name, dev = s.dev, spawnAcc = s.spawnAcc,
+                waitToId = s.waitToId, waitN = s.waitN, edgeOverrides = s.edgeOverrides,
+                level = 0,
+            };
+        }
+        d.st = stList;
+        return d;
     }
 
     // v3(通過駅を挟む多区間の概念が存在しない)をv4形式へ正規化する。全てのRun列車は
@@ -767,12 +839,12 @@ public static class SaveLoad
 
     // 参照整合性・値域・重複ID・重複予約claimを、GameObjectを一切生成せずに検証する。
     // ここを通過すれば ApplyToWorld は原則として失敗しない
-    static bool Validate(GameDataV4 d, out string error)
+    static bool Validate(GameDataV5 d, out string error)
     {
         error = null;
         // JsonUtilityはJSONに存在しない配列フィールドをnullのまま残す(空配列にはならない)。
         // 以降ApplyToWorldでも同じdを使い回すため、ここで一度だけ正規化しておく
-        if (d.st == null) d.st = new StDataV3[0];
+        if (d.st == null) d.st = new StDataV4[0];
         if (d.seg == null) d.seg = new SegDataV2[0];
         if (d.ln == null) d.ln = new LnDataV2[0];
         if (d.tr == null) d.tr = new TrDataV3[0];
@@ -802,6 +874,8 @@ public static class SaveLoad
             // M2-D: 面数より線数が1つ少なくても各面が物理線に接続できる
             // (例: 3面2線、外側|1番線|島式|2番線|外側)。最低構成はMax(1,faces-1)
             if (sd.lines < Mathf.Max(1, sd.faces - 1)) { error = "station構成が不正(lines不足): " + sd.id; return false; }
+            // 階はUIが出せる範囲(地上〜4階)のみ。将来の地下は負値で広げる
+            if (sd.level < 0 || sd.level > 3) { error = "station levelが範囲外: " + sd.id; return false; }
             if (float.IsNaN(sd.x) || float.IsInfinity(sd.x) || float.IsNaN(sd.z) || float.IsInfinity(sd.z)
                 || float.IsNaN(sd.yaw) || float.IsInfinity(sd.yaw)) { error = "station座標が不正: " + sd.id; return false; }
             // devは行き先抽選の重み・spawnAcc更新レートに使われるため、NaN/Infinityが
@@ -1098,7 +1172,7 @@ public static class SaveLoad
     // 途中で例外が起きた場合はstaging rootだけを破棄し、既存ワールド・GameState・
     // TrackNetwork/Servicesは一切変更されない(実装後レビューでCodex CLIが指摘した
     // 「ロードがトランザクショナルでない」Critical指摘への対応)
-    static bool ApplyToWorld(GameDataV4 d, out string error)
+    static bool ApplyToWorld(GameDataV5 d, out string error)
     {
         error = null;
         var stagingRoot = new GameObject("LoadStaging");
@@ -1107,7 +1181,7 @@ public static class SaveLoad
         {
             // 駅はstable ID昇順で生成する(旅客の行き先抽選・乗車順の決定性のため。
             // Station.Tick/Train.BoardはいずれもTrackNetwork.stationsの登録順に依存する)
-            var sortedSt = new List<StDataV3>(d.st);
+            var sortedSt = new List<StDataV4>(d.st);
             sortedSt.Sort((x, y) => x.id.CompareTo(y.id));
             var stagedStations = new List<Station>();
             var stById = new Dictionary<int, Station>();
@@ -1115,9 +1189,12 @@ public static class SaveLoad
             {
                 var go = new GameObject(sd.name);
                 go.transform.SetParent(stagingRoot.transform, false);
-                go.transform.SetPositionAndRotation(new Vector3(sd.x, 0, sd.z), Quaternion.Euler(0, sd.yaw, 0));
+                go.transform.SetPositionAndRotation(
+                    new Vector3(sd.x, RailDimensions.HeightOfLevel(sd.level), sd.z),
+                    Quaternion.Euler(0, sd.yaw, 0));
                 var s = go.AddComponent<Station>();
                 s.id = sd.id;
+                s.level = sd.level;
                 s.cars = sd.cars;
                 s.faces = sd.faces;
                 s.lines = sd.lines;

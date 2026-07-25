@@ -11,6 +11,7 @@ public class BuildController : MonoBehaviour
 
     // 駅建設パラメータ
     public int pCars = 6, pFaces = 2, pLines = 2;
+    public int pLevel;                 // 建設予定の階(0=地上)
     public float pYaw;
     public Station previewStation;
     public Station rebuildTarget;   // 建て替え対象(非nullなら駅モードは建て替え動作)
@@ -38,6 +39,7 @@ public class BuildController : MonoBehaviour
     }
 
     Station trackFirst;
+    Station lastPicked;             // 重なった駅をタップで順送りするための直前の選択
     GameObject trackMarker;
     public TrackBedType pTrackBedType = TrackBedType.Ballast;
     public Station TrackFirst => trackFirst;
@@ -93,6 +95,7 @@ public class BuildController : MonoBehaviour
             Instance.previewStation = null;
             Instance.rebuildTarget = null;
             Instance.trackFirst = null;
+            Instance.lastPicked = null;
             if (Instance.trackMarker != null) Object.DestroyImmediate(Instance.trackMarker);
             Instance.trackMarker = null;
             Instance.selLines.Clear();
@@ -123,11 +126,7 @@ public class BuildController : MonoBehaviour
 
     public void HandleTap(Ray ray)
     {
-        Station tapped = null;
-        RaycastHit hit;
-        if (Physics.Raycast(ray, out hit, 20000f))
-            tapped = hit.collider.GetComponentInParent<Station>();
-        if (tapped != null && tapped.preview) tapped = null;
+        Station tapped = PickStation(ray);
 
         Vector3 ground = Vector3.zero;
         bool hasGround = false;
@@ -169,11 +168,37 @@ public class BuildController : MonoBehaviour
         }
     }
 
+    // 立体交差では1本のレイが複数の駅を貫く。上から見ると高架駅が必ず手前に来るため、
+    // 単純な最寄りヒットだと真下の地上駅が永久に選べなくなる(実装後レビューでCodex CLIが指摘)。
+    // 同じ場所を続けてタップしたら、貫いた駅を手前から順に切り替える
+    public Station PickStation(Ray ray)
+    {
+        var hits = Physics.RaycastAll(ray, 20000f);
+        System.Array.Sort(hits, (x, y) => x.distance.CompareTo(y.distance)); // RaycastAllは順不同
+        var found = new List<Station>();
+        foreach (var h in hits)
+        {
+            var st = h.collider.GetComponentInParent<Station>();
+            if (st == null || st.preview || found.Contains(st)) continue;
+            found.Add(st);
+        }
+        if (found.Count == 0) { lastPicked = null; return null; }
+        if (found.Count == 1) { lastPicked = found[0]; return found[0]; }
+
+        // 直前に選んだ駅の次へ回す(未選択・別の駅を選んでいた場合は手前から)
+        var pick = found[(found.IndexOf(lastPicked) + 1) % found.Count];
+        lastPicked = pick;
+        UIController.Toast("ここには駅が" + found.Count + "つ重なっています。" +
+            pick.stationName + "を選択(もう一度タップで次の駅へ)");
+        return pick;
+    }
+
     // ---- 駅建設 ----
 
     void MovePreview(Vector3 pos)
     {
-        pos = new Vector3(Mathf.Round(pos.x / 5f) * 5f, 0, Mathf.Round(pos.z / 5f) * 5f);
+        pos = new Vector3(Mathf.Round(pos.x / 5f) * 5f,
+            RailDimensions.HeightOfLevel(pLevel), Mathf.Round(pos.z / 5f) * 5f);
         if (previewStation == null)
         {
             var go = new GameObject("StationPreview");
@@ -192,6 +217,10 @@ public class BuildController : MonoBehaviour
         previewStation.cars = pCars;
         previewStation.faces = pFaces;
         previewStation.lines = pLines;
+        previewStation.level = pLevel;
+        // 階を変えたら位置のYも追従させる(Station.Build()も同じ高さを再確定させる)
+        var pp = previewStation.transform.position;
+        previewStation.transform.position = new Vector3(pp.x, RailDimensions.HeightOfLevel(pLevel), pp.z);
         previewStation.transform.rotation = Quaternion.Euler(0, pYaw, 0);
         previewStation.Build();
     }
@@ -206,7 +235,7 @@ public class BuildController : MonoBehaviour
         }
         string blocked = DescribePlacementObstruction(previewStation, null);
         if (blocked != null) { UIController.Toast(blocked); return; }
-        double cost = GameState.StationCost(pCars, pFaces, pLines);
+        double cost = GameState.StationCost(pCars, pFaces, pLines, pLevel);
         if (!GameState.Spend(cost))
         {
             UIController.Toast("資金不足(" + (cost / 1e8).ToString("F1") + "億円必要)");
@@ -272,7 +301,7 @@ public class BuildController : MonoBehaviour
     {
         SetMode(Mode.Station);            // 既存プレビュー/選択をクリア
         rebuildTarget = st;
-        pCars = st.cars; pFaces = st.faces; pLines = st.lines;
+        pCars = st.cars; pFaces = st.faces; pLines = st.lines; pLevel = st.level;
         pYaw = st.transform.eulerAngles.y;
         st.SetRenderersVisible(false);    // 実駅を隠してプレビューを重ねる
         MovePreview(st.transform.position);
@@ -288,7 +317,7 @@ public class BuildController : MonoBehaviour
         // (自分自身と、自分に繋がる線路は当然重なるので除外する)
         string blocked = DescribePlacementObstruction(previewStation, st);
         if (blocked != null) { UIController.Toast(blocked); return; }
-        if (!RebuildStation(st, pCars, pFaces, pLines)) return; // 資金不足時は建て替えモード継続
+        if (!RebuildStation(st, pCars, pFaces, pLines, pLevel)) return; // 資金不足時は建て替えモード継続
         rebuildTarget = null;
         if (previewStation != null) { Destroy(previewStation.gameObject); previewStation = null; }
         SetMode(Mode.View);
@@ -296,10 +325,17 @@ public class BuildController : MonoBehaviour
     }
 
     // 駅パラメータを変更してメッシュ・接続線路を作り直し、通過列車を再同期する
-    public bool RebuildStation(Station st, int cars, int faces, int lines)
+    // levelを省略した場合は現在の階を維持する(既定0にすると建て替えで地上へ落ちてしまう)
+    public bool RebuildStation(Station st, int cars, int faces, int lines, int? level = null)
     {
-        double oldCost = GameState.StationCost(st.cars, st.faces, st.lines);
-        double newCost = GameState.StationCost(cars, faces, lines);
+        int newLevel = level ?? st.level;
+        // 階を変えると接続済みの線路の勾配が変わる。上限を超えるならそもそも建て替えない
+        // (新規接続時のTapTrackStationと同じ基準。ここを見ないと既設線が急勾配になる)
+        string tooSteep = DescribeGradeViolation(st, newLevel, cars);
+        if (tooSteep != null) { UIController.Toast(tooSteep); return false; }
+
+        double oldCost = GameState.StationCost(st.cars, st.faces, st.lines, st.level);
+        double newCost = GameState.StationCost(cars, faces, lines, newLevel);
         double delta = newCost - oldCost;
         if (delta > 0 && !GameState.Spend(delta))
         {
@@ -308,8 +344,8 @@ public class BuildController : MonoBehaviour
         }
         if (delta < 0) GameState.Refund(-delta * 0.5); // 縮小は差額の半分を払い戻し
 
-        st.cars = cars; st.faces = faces; st.lines = lines;
-        st.Build();                         // メッシュ・レイアウト・occupied再生成
+        st.cars = cars; st.faces = faces; st.lines = lines; st.level = newLevel;
+        st.Build();                         // メッシュ・レイアウト・occupied再生成(高さも再確定)
         st.SetRenderersVisible(true);
 
         // 接続する線路は駅端(End)が動くので作り直す
@@ -332,14 +368,42 @@ public class BuildController : MonoBehaviour
 
         TrackNetwork.MarkDirty();
         SaveLoad.Save();
-        UIController.Toast(st.stationName + "を建て替え(" + cars + "両" + faces + "面" + lines + "線)");
+        UIController.Toast(st.stationName + "を建て替え(" + cars + "両" + faces + "面" + lines + "線 " +
+            UIController.LevelLabel(newLevel) + ")");
         return true;
+    }
+
+    // 駅stをnewLevel・newCarsへ変えた場合に、接続済みの線路が勾配の上限を超えるか。
+    // 超えるなら理由の文言を返す(超えなければnull)。
+    // **建て替え後の寸法で測ること**。両数を増やすとスロート端が相手側へ寄って
+    // 水平距離が縮むので、現在のEnd()で測ると階と両数の同時変更をすり抜けてしまう
+    // (実装後レビューでCodex CLIが指摘)
+    public static string DescribeGradeViolation(Station st, int newLevel, int newCars)
+    {
+        float newY = RailDimensions.HeightOfLevel(newLevel);
+        float newHalf = StationLayout.Length(newCars) * 0.5f + StationLayout.ThroatLen;
+        foreach (var seg in TrackNetwork.segments)
+        {
+            if (seg.a != st && seg.b != st) continue;
+            var other = seg.a == st ? seg.b : seg.a;
+            Vector3 pSt = st.transform.position + st.Axis * (seg.SignAt(st) * newHalf);
+            Vector3 pOther = other.End(seg.SignAt(other));
+            float dh = Mathf.Abs(newY - pOther.y);
+            if (dh <= 0.01f) continue;
+            float flat = Vector2.Distance(new Vector2(pSt.x, pSt.z), new Vector2(pOther.x, pOther.z));
+            float need = 1.5f * dh / RailDimensions.MaxGrade;
+            if (flat < need)
+                return other.stationName + "との高低差" + dh.ToString("F0") + "mに対して" +
+                    "線路が急すぎます(" + need.ToString("F0") + "m以上必要、現在" +
+                    flat.ToString("F0") + "m)";
+        }
+        return null;
     }
 
     // 駅を撤去。接続線路と通過列車も消し、半額を払い戻す
     public void RemoveStation(Station st)
     {
-        double refund = GameState.StationCost(st.cars, st.faces, st.lines) * 0.5;
+        double refund = GameState.StationCost(st.cars, st.faces, st.lines, st.level) * 0.5;
         int removedTrains = 0;
         foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
         {
@@ -474,6 +538,22 @@ public class BuildController : MonoBehaviour
         {
             UIController.Toast("駅同士が近すぎて接続できません(駅を少し離して建ててください)");
             return;
+        }
+        // 階が違う場合は勾配の上限を守れるだけの水平距離が要る。縦断は両端の勾配を0にする
+        // S字なので、最大勾配は平均勾配の1.5倍になる(RailDimensions.MaxGrade参照)
+        float dh = Mathf.Abs(a.End(bestSa).y - st.End(bestSb).y);
+        if (dh > 0.01f)
+        {
+            Vector3 pa = a.End(bestSa), pb = st.End(bestSb);
+            float flat = Vector2.Distance(new Vector2(pa.x, pa.z), new Vector2(pb.x, pb.z));
+            float need = 1.5f * dh / RailDimensions.MaxGrade;
+            if (flat < need)
+            {
+                UIController.Toast("高低差" + dh.ToString("F0") + "mを結ぶには" +
+                    need.ToString("F0") + "m以上離す必要があります(現在" +
+                    flat.ToString("F0") + "m)");
+                return;
+            }
         }
         // 間に別の駅がある区間を直結すると、道床がその駅のホームを貫通して描画される。
         // 通過駅は系統側(FindPath)で表現できるので、線路自体は途中駅を経由して敷いてもらう

@@ -7,8 +7,14 @@ public class Station : MonoBehaviour
 {
     public int id; // M2-C: セーブ/ロードを跨いで安定な識別子。0は未割当(preview等)
     public int cars = 6, faces = 2, lines = 2;
+    // 階。0=地上、1=2階、2=3階…(将来の地下は負の値)。実際の高さは
+    // RailDimensions.HeightOfLevel(level)で、駅のtransform.position.yがこれになる。
+    // 駅のメッシュは全てローカル座標で作るので、Yを上げるだけで駅ごと持ち上がる
+    public int level;
     public string stationName = "駅";
     public bool preview;
+
+    public float Height => RailDimensions.HeightOfLevel(level);
 
     public StationLayout.Result layout;
     public float dev;
@@ -73,6 +79,11 @@ public class Station : MonoBehaviour
         }
 
         occupied = new bool[layout.trackOffsets.Length];
+
+        // 階に応じた高さを常にここで確定させる。位置はBuildController/ロード側でも
+        // 設定するが、建て替えや復元で取りこぼすと駅だけ地上へ落ちてしまう
+        var pos = transform.position;
+        transform.position = new Vector3(pos.x, Height, pos.z);
 
         float H = HalfLen, T = StationLayout.ThroatLen;
         RebuildTrackVisual();   // 線路・渡り線・車止め(接続状態で頭端/貫通を切替)
@@ -235,6 +246,15 @@ public class Station : MonoBehaviour
             RailKit.AddBox(metalwork, new Vector3(houseX + 5.12f, 2.15f, mullion * 1.35f),
                 new Vector3(0.1f, 3.0f, 0.1f), Quaternion.identity);
 
+        // 高架駅は桁と橋脚で地面まで支える。ローカルy=0がレール基面なので、
+        // 桁はその直下、橋脚はさらに地面(ローカルy=-Height)まで下ろす
+        if (level != 0)
+        {
+            var viaduct = new RailKit.MeshData();
+            AddViaduct(viaduct, H, T);
+            RailKit.MeshGO("Viaduct", viaduct.ToMesh(), MatLib.Get("Platform"), transform);
+        }
+
         RailKit.MeshGO("PlatformBase", platformBase.ToMesh(), MatLib.Get("Platform"), transform);
         RailKit.MeshGO("PlatformSurface", platformSurface.ToMesh(), MatLib.Get("StationHouse"), transform);
         RailKit.MeshGO("PlatformEdge", platformEdge.ToMesh(), MatLib.Get("StationHouse"), transform);
@@ -252,8 +272,11 @@ public class Station : MonoBehaviour
 
         var col = gameObject.GetComponent<BoxCollider>();
         if (col == null) col = gameObject.AddComponent<BoxCollider>();
+        // スマホでのタップを外しにくいよう実寸よりだいぶ大きめに取る。
+        // ただし高架でも橋脚ぶん下へ伸ばしてはいけない。立体交差では上を向いた
+        // レイが先に高架駅へ当たり、真下の地上駅が一切選べなくなる
+        // (実装後レビューでCodex CLIが指摘)
         col.center = new Vector3(0, 5, 0);
-        // スマホでのタップを外しにくいよう実寸よりだいぶ大きめに取る
         col.size = new Vector3(layout.totalWidth + 50f, 10f, (H + T) * 2f + 30f);
 
         var labelGo = new GameObject("Label");
@@ -435,6 +458,36 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("SwitchBox", swBox.ToMesh(), MatLib.Get("SwitchBox"), tw.transform);
     }
 
+    // 高架の桁と橋脚(駅ローカル)。桁はスロート端まで通し、橋脚は一定間隔で
+    // 構内幅の左右2列に立てる。地上駅(level==0)では呼ばない
+    void AddViaduct(RailKit.MeshData md, float H, float T)
+    {
+        float deck = RailDimensions.ViaductDeckThickness;
+        float drop = Height;                       // レール基面から地面までの落差
+        float len = (H + T) * 2f;                  // スロート端から端まで
+        float w = layout.totalWidth + 2f;          // 構内幅より少し広く張り出す
+
+        // 桁(レール基面のすぐ下)
+        RailKit.AddBox(md, new Vector3(0f, -deck * 0.5f, 0f),
+            new Vector3(w, deck, len), Quaternion.identity);
+
+        // 橋脚。地上へ届かない高さ(level==0)なら不要
+        float pierTop = -deck;
+        float pierBottom = -drop;
+        float pierH = pierTop - pierBottom;
+        if (pierH <= 0.1f) return;
+        float pw = RailDimensions.ViaductPierWidth;
+        float px = Mathf.Max(pw, w * 0.5f - 2f);
+        int rows = Mathf.Max(2, Mathf.CeilToInt(len / RailDimensions.ViaductPierSpacing));
+        for (int i = 0; i <= rows; i++)
+        {
+            float z = Mathf.Lerp(-len * 0.5f + pw, len * 0.5f - pw, i / (float)rows);
+            for (int sx = -1; sx <= 1; sx += 2)
+                RailKit.AddBox(md, new Vector3(sx * px, pierBottom + pierH * 0.5f, z),
+                    new Vector3(pw, pierH, pw), Quaternion.identity);
+        }
+    }
+
     // ホーム端の絞り(z0側が全幅halfW0、z1側が細いhalfW1)。yBottom..yTopの角柱を
     // AddBoxと同じ頂点順(bit0=x, bit1=y, bit2=z)で組む
     static void AddTaperedApron(RailKit.MeshData md, float centerX, float z0, float z1,
@@ -468,6 +521,8 @@ public class Station : MonoBehaviour
     {
         if (layout.platforms == null || layout.platforms.Count == 0) return false;
         var local = transform.InverseTransformPoint(world);
+        // 高さが十分違えば、平面上は重なっていても当たらない(高架下・跨線)
+        if (Mathf.Abs(local.y) >= RailDimensions.LevelClearance) return false;
         float halfLen = cars * StationLayout.CarLength * 0.5f;
         if (Mathf.Abs(local.z) > halfLen + margin) return false;
         foreach (var p in layout.platforms)
@@ -489,6 +544,7 @@ public class Station : MonoBehaviour
     {
         if (layout.trackOffsets == null) return false;
         var local = transform.InverseTransformPoint(world);
+        if (Mathf.Abs(local.y) >= RailDimensions.LevelClearance) return false;
         return Mathf.Abs(local.x) <= FootprintHalfWidth + margin
             && Mathf.Abs(local.z) <= FootprintHalfLength + margin;
     }
@@ -499,6 +555,9 @@ public class Station : MonoBehaviour
     {
         if (a == null || b == null) return false;
         if (a.layout.trackOffsets == null || b.layout.trackOffsets == null) return false;
+        // 階が違って十分な高低差があれば、平面が重なっていても干渉しない(立体交差)
+        if (Mathf.Abs(a.transform.position.y - b.transform.position.y) >= RailDimensions.LevelClearance)
+            return false;
         Vector3 ax = a.transform.right, az = a.transform.forward;
         Vector3 bx = b.transform.right, bz = b.transform.forward;
         float ahx = a.FootprintHalfWidth + margin * 0.5f, ahz = a.FootprintHalfLength + margin * 0.5f;

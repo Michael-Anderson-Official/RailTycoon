@@ -211,6 +211,6 @@ public class SaveLoadV4Tests
 
         SaveLoad.Save();
         string raw2 = PlayerPrefs.GetString(Key);
-        Assert.That(raw2, Does.Contain("\"v\":4"), "次にSaveすると初めてv4として書き戻ること");
+        Assert.That(raw2, Does.Contain("\"v\":5"), "次にSaveすると初めて最新版(v5)として書き戻ること");
     }
 }

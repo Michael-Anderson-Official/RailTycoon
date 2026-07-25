@@ -71,6 +71,12 @@ public class TrackSegment
         RailKit.AddTrack(bed, rail, support, sidePlus, bedType, detail);
         RailKit.AddTrack(bed, rail, support, sideMinus, bedType, detail);
 
+        // 地面から十分に浮いている区間は高架として桁と橋脚で支える
+        var viaduct = new RailKit.MeshData();
+        AddViaduct(viaduct);
+        if (viaduct.v.Count > 0)
+            RailKit.MeshGO("Viaduct", viaduct.ToMesh(), MatLib.Get("Platform"), go.transform);
+
         // 渡り線は駅前(スロートのリード)に駅側で描く。segmentには描かない
         length = Vector3.Distance(EndA, EndB);
         bool slab = bedType == TrackBedType.Slab;
@@ -81,6 +87,59 @@ public class TrackSegment
             MatLib.Get(slab ? "Platform" : "Tie"), go.transform);
         if (detail.v.Count > 0)
             RailKit.MeshGO("SlabDetail", detail.ToMesh(), MatLib.Get("Switch"), go.transform);
+    }
+
+    // 高架の桁と橋脚。中心線のYが地面からLevelClearance以上ある区間だけを高架とみなし、
+    // 連続する区間ごとに1枚の桁を左右2線ぶんまとめて渡す。地面へ降りる勾配部分は
+    // 盛土扱いにして何も足さない(桁を無理に地面まで連続させると不自然になるため)
+    void AddViaduct(RailKit.MeshData md)
+    {
+        var c = CenterPoints();
+        if (c == null || c.Count < 2) return;
+        float clear = RailDimensions.LevelClearance;
+        float deck = RailDimensions.ViaductDeckThickness;
+        float half = HalfCorridorWidth;
+
+        var run = new List<Vector3>();
+        for (int i = 0; i <= c.Count; i++)
+        {
+            if (i < c.Count && c[i].y >= clear) { run.Add(c[i]); continue; }
+            if (run.Count >= 2)
+            {
+                RailKit.AddSlab(md, run, half, 0f, deck);
+                AddPiers(md, run, deck, half);
+            }
+            run.Clear();
+        }
+    }
+
+    // 桁の下に一定間隔で橋脚を2列立てる。地面(y=0)から桁の下面まで
+    static void AddPiers(RailKit.MeshData md, List<Vector3> run, float deck, float half)
+    {
+        float pw = RailDimensions.ViaductPierWidth;
+        float px = Mathf.Max(pw, half - 1f);
+        float travelled = RailDimensions.ViaductPierSpacing;   // 起点は駅側の桁に任せる
+        for (int i = 1; i < run.Count; i++)
+        {
+            Vector3 p0 = run[i - 1], p1 = run[i];
+            float d = Vector3.Distance(new Vector3(p0.x, 0, p0.z), new Vector3(p1.x, 0, p1.z));
+            if (d < 1e-4f) continue;
+            travelled += d;
+            if (travelled < RailDimensions.ViaductPierSpacing) continue;
+            travelled = 0f;
+
+            float top = p1.y - deck;
+            if (top <= 0.1f) continue;
+            Vector3 fwd = p1 - p0; fwd.y = 0f;
+            var rot = fwd.sqrMagnitude > 1e-6f
+                ? Quaternion.LookRotation(fwd.normalized, Vector3.up) : Quaternion.identity;
+            Vector3 side = rot * Vector3.right;
+            for (int sx = -1; sx <= 1; sx += 2)
+            {
+                Vector3 at = new Vector3(p1.x, top * 0.5f, p1.z) + side * (sx * px);
+                RailKit.AddBox(md, at, new Vector3(pw, top, pw), rot);
+            }
+        }
     }
 
     // A端→B端の中心線。両駅それぞれの発着方向(Axis*sign)へ、実際の鉄道のように

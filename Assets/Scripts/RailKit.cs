@@ -197,14 +197,16 @@ public static class RailKit
         Vector3 d0 = tan0, d1 = tan1;
         d0.y = 0; d1.y = 0;
         if (d0.sqrMagnitude < 1e-8f || d1.sqrMagnitude < 1e-8f)
-            return HermitePath(p0, tan0, p1, tan1, n);
+            return ApplyVerticalProfile(HermitePath(p0, tan0, p1, tan1, n), p0.y, p1.y);
         d0.Normalize();
         d1.Normalize();
 
         // p0 + t*d0 = p1 + s*d1 をXZ平面で解く
         float det = d1.x * d0.z - d0.x * d1.z;
         float dist = Vector3.Distance(p0, p1);
-        if (Mathf.Abs(det) < 1e-5f) return HermitePath(p0, tan0, p1, tan1, n); // ほぼ平行
+        // ほぼ平行(直線に近い)。縦断はPI法の枝と同じ扱いに揃える
+        if (Mathf.Abs(det) < 1e-5f)
+            return ApplyVerticalProfile(HermitePath(p0, tan0, p1, tan1, n), p0.y, p1.y);
 
         float bx = p1.x - p0.x, bz = p1.z - p0.z;
         float t = (-bx * d1.z + d1.x * bz) / det;
@@ -214,7 +216,7 @@ public static class RailKit
         // 極端に遠くないことを確認する。外れる場合は不自然なカーブになるため
         // フォールバックする
         if (t <= 0.01f || s >= -0.01f || t > dist * 6f || -s > dist * 6f)
-            return HermitePath(p0, tan0, p1, tan1, n);
+            return ApplyVerticalProfile(HermitePath(p0, tan0, p1, tan1, n), p0.y, p1.y);
 
         Vector3 pi = p0 + d0 * t;
         var pts = new List<Vector3>(n + 1);
@@ -223,6 +225,39 @@ public static class RailKit
             float u = i / (float)n;
             float w0 = (1f - u) * (1f - u), w1 = 2f * (1f - u) * u, w2 = u * u;
             pts.Add(w0 * p0 + w1 * pi + w2 * p1);
+        }
+        return ApplyVerticalProfile(pts, p0.y, p1.y);
+    }
+
+    // 水平形状はそのままに、Yだけを弧長に沿ったS字で置き換える。
+    // PI法(2次ベジエ)はXZ平面で解いており、PIのYは始点と同じになるため、
+    // そのままだとYが u² で効いて「出発側は勾配ゼロ、到着側で最大」という
+    // 非対称な縦断になり、到着駅で線路が折れる。
+    // 駅は水平でなければならないので、両端の勾配が0になるS字(smoothstep)にする。
+    // 高低差が無ければ何も変えない(=従来の平坦な線形と完全に一致する)
+    public static List<Vector3> ApplyVerticalProfile(List<Vector3> pts, float y0, float y1)
+    {
+        if (pts == null || pts.Count < 2) return pts;
+        if (Mathf.Abs(y1 - y0) < 1e-4f)
+        {
+            for (int i = 0; i < pts.Count; i++)
+                pts[i] = new Vector3(pts[i].x, y0, pts[i].z);
+            return pts;
+        }
+        // 水平距離の累積で位置を測る(Yを含めると勾配とYが相互に影響してしまう)
+        var cum = new float[pts.Count];
+        for (int i = 1; i < pts.Count; i++)
+        {
+            float dx = pts[i].x - pts[i - 1].x, dz = pts[i].z - pts[i - 1].z;
+            cum[i] = cum[i - 1] + Mathf.Sqrt(dx * dx + dz * dz);
+        }
+        float total = cum[cum.Length - 1];
+        if (total < 1e-4f) return pts;
+        for (int i = 0; i < pts.Count; i++)
+        {
+            float u = cum[i] / total;
+            float sm = u * u * (3f - 2f * u);   // 両端で傾き0
+            pts[i] = new Vector3(pts[i].x, Mathf.Lerp(y0, y1, sm), pts[i].z);
         }
         return pts;
     }

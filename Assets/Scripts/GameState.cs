@@ -31,8 +31,9 @@ public static class GameState
         carried += pax;
     }
 
-    public static double StationCost(int cars, int faces, int lines)
-        => (2.0 + 0.1 * cars * (faces + lines)) * 1e8;
+    // 高架は用地取得こそ小さいが構造物が高くつく。階が上がるほど割高にする
+    public static double StationCost(int cars, int faces, int lines, int level = 0)
+        => (2.0 + 0.1 * cars * (faces + lines)) * (1.0 + 0.6 * Mathf.Abs(level)) * 1e8;
 
     public static string MoneyLabel => (money / 1e8).ToString("F2") + "億円";
 

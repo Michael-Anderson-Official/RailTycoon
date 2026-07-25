@@ -85,7 +85,7 @@ public class SaveLoadV3Tests
         Assert.That(disabledCount, Is.EqualTo(1));
 
         string raw = PlayerPrefs.GetString(Key);
-        Assert.That(raw, Does.Contain("\"v\":4"), "保存は常に最新版(v4)で行われること");
+        Assert.That(raw, Does.Contain("\"v\":5"), "保存は常に最新版(v5)で行われること");
     }
 
     // ============================================================
