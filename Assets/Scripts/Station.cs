@@ -312,6 +312,42 @@ public class Station : MonoBehaviour
     // ホーム側へ届かなくなる
     public const float PlatformEndHold = 3f;
 
+    // RebuildTrackVisualが実際に描画へ渡した線ごとの中心線(ローカル、平滑化済み)。
+    // 走行経路もここから切り出すので、レールと列車の通り道は同じ実体になる
+    List<Vector3>[] trackCentres;
+
+    // 線trackの中心線(ローカル)。未生成なら生成しておく
+    public List<Vector3> TrackCentreLocal(int track)
+    {
+        if (trackCentres == null || track < 0 || track >= trackCentres.Length) return null;
+        return trackCentres[track];
+    }
+
+    // 中心線のうち、ローカルzがzFrom→zToの区間だけを切り出す(両端は補間して正確に合わせる)。
+    // zFrom>zToなら逆向き(=-z方向へ進む列車)の順で返す。
+    // 中心線はzについて単調に並んでいる前提(TrackVisualPathがそう作っている)
+    public static List<Vector3> PortionByZ(List<Vector3> pts, float zFrom, float zTo)
+    {
+        var outPts = new List<Vector3>();
+        if (pts == null || pts.Count < 2) return outPts;
+        float lo = Mathf.Min(zFrom, zTo), hi = Mathf.Max(zFrom, zTo);
+        Vector3? loPt = null, hiPt = null;
+        for (int i = 0; i + 1 < pts.Count; i++)
+        {
+            Vector3 p = pts[i], q = pts[i + 1];
+            if (Mathf.Approximately(p.z, q.z)) continue;
+            float tLo = (lo - p.z) / (q.z - p.z);
+            if (tLo >= 0f && tLo <= 1f && loPt == null) loPt = Vector3.Lerp(p, q, tLo);
+            float tHi = (hi - p.z) / (q.z - p.z);
+            if (tHi >= 0f && tHi <= 1f) hiPt = Vector3.Lerp(p, q, tHi);
+        }
+        if (loPt.HasValue) outPts.Add(loPt.Value);
+        foreach (var p in pts) if (p.z > lo && p.z < hi) outPts.Add(p);
+        if (hiPt.HasValue) outPts.Add(hiPt.Value);
+        if (zFrom > zTo) outPts.Reverse();
+        return outPts;
+    }
+
     List<Vector3> TrackVisualPath(int i, bool cMinus, bool cPlus)
     {
         float off = layout.trackOffsets[i];
@@ -361,10 +397,16 @@ public class Station : MonoBehaviour
         var swMetal = new RailKit.MeshData();
         var swBox = new RailKit.MeshData();
 
+        // 描画に使った中心線をそのまま保持する。列車の走行経路(Train.BuildLeg)も
+        // これを切り出して使うため、レールと列車の通り道が原理的にズレない
+        // (以前は同じ形を別々に組んでいたため、片方だけ直すと列車がレールから浮いた)
+        trackCentres = new List<Vector3>[layout.trackOffsets.Length];
         for (int i = 0; i < layout.trackOffsets.Length; i++)
-            RailKit.AddTrack(ballast, rail, tie,
-                RailKit.Chaikin(TrackVisualPath(i, conn[0], conn[1]), 2),
+        {
+            trackCentres[i] = RailKit.Chaikin(TrackVisualPath(i, conn[0], conn[1]), 2);
+            RailKit.AddTrack(ballast, rail, tie, trackCentres[i],
                 TrackBedType.Ballast, null, RailDimensions.StationBedHalfWidth);
+        }
 
         bool hasL = false, hasR = false;
         foreach (int si in layout.stopTracks) { if (layout.trackOffsets[si] < 0) hasL = true; else hasR = true; }

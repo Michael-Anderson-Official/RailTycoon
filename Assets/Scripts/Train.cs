@@ -713,44 +713,79 @@ public class Train : MonoBehaviour
     // 必要がある、という判定に使うしきい値
     const float CrossoverMismatch = 0.1f;
 
+    // 走行経路を最後に取り直す間隔。台車のサンプル窓(BogieSampleWindow=1.5m)より
+    // 十分細かくし、かつ点数が増えすぎない値
+    const float PathSampleSpacing = 1.0f;
+
     // 駅stを出て(またはそこへ入って)signの向きの区間へ抜けるまでの点列を作る部品。
     // BuildLeg/BuildMultiLegから共通で使う(通過駅では停止位置マーカー(タップ余白)を
     // 省き、ホーム中心のみで繋ぐ)。mainOffsetは接続先(駅間カーブ)の端点をst基準の
     // ローカルxへ直したもの(このstから見た本線側オフセット)
-    static List<Vector3> StationDeparture(Station st, int track, int sign, float mainOffset, float halfTrain, bool includeTailMarker)
+    // 駅構内の走行経路は、実際に描画したレールの中心線(Station.TrackCentreLocal)を
+    // そのまま切り出して使う。以前は同じ形をここで別途組み直していたため、片方だけ
+    // 直すと列車がレールから浮いた(スロートの収束の滲み出しがまさにそれだった)
+    static List<Vector3> StationRun(Station st, int track, int sign, float mainOffset,
+        float halfTrain, bool includeTailMarker, bool departing)
     {
-        var pts = new List<Vector3>();
         float h = st.HalfLen, tf = StationLayout.ThroatLen, L = StationLayout.LeadLen;
         float conv = Mathf.Sign(st.layout.trackOffsets[track]) * 2.3f;
-        if (includeTailMarker) pts.Add(st.TrackWorldPoint(track, -sign * halfTrain));
-        pts.Add(st.TrackWorldPoint(track, 0));
-        // ホーム端の直前に押さえを入れ、Chaikinの角の丸めでスロートの収束が
-        // ホーム区間へ遡らないようにする(Station.TrackVisualPathと同じ理由・同じ距離。
-        // 揃えておかないと、レールは真っ直ぐなのに列車だけ内側へ寄って浮いて見える)
-        pts.Add(st.TrackWorldPoint(track, sign * (h - Station.PlatformEndHold)));
-        pts.Add(st.TrackWorldPoint(track, sign * h));                                              // ホーム端
-        pts.Add(st.transform.TransformPoint(new Vector3(conv, 0, sign * (h + tf - L))));           // 収束(自線側±2.3)
+        var centre = st.TrackCentreLocal(track);
+        // 駅端(z=±(h+tf))まで伸びた中心線が無い場合(未接続端など)は、従来どおり
+        // その場で組む。走行経路が途切れるのを避けるための保険
+        if (centre == null || centre.Count < 2)
+            return LegacyStationRun(st, track, sign, mainOffset, halfTrain, includeTailMarker, departing);
+
+        float zStop = includeTailMarker ? -sign * halfTrain : 0f;
+        float zEnd = sign * (h + tf);
+        var local = departing ? Station.PortionByZ(centre, zStop, zEnd)
+                              : Station.PortionByZ(centre, zEnd, zStop);
+        if (local.Count < 2)
+            return LegacyStationRun(st, track, sign, mainOffset, halfTrain, includeTailMarker, departing);
+
+        // 停車線が進行方向の本線側と反対だった場合は、リード区間(駅端手前L)の中で
+        // 両渡り線を渡って本線側へ移る。Station側が同じ位置に渡り線を描いている
         if (Mathf.Abs(mainOffset - conv) > CrossoverMismatch)
-            pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf - L * 0.5f)))); // 両渡り線で本線側へ
-        pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf))));         // 駅端(リード端、本線側)
+        {
+            float zLeadStart = sign * (h + tf - L);
+            for (int i = 0; i < local.Count; i++)
+            {
+                var p = local[i];
+                // InverseLerpは範囲の大小が逆でも(sign<0でも)正しく0→1を返す
+                float t = Mathf.InverseLerp(zLeadStart, zEnd, p.z);
+                if (t <= 0f) continue;
+                local[i] = new Vector3(Mathf.Lerp(p.x, mainOffset, Mathf.Clamp01(t)), p.y, p.z);
+            }
+        }
+
+        var pts = new List<Vector3>(local.Count);
+        foreach (var p in local) pts.Add(st.transform.TransformPoint(p));
         return pts;
     }
 
-    static List<Vector3> StationArrival(Station st, int track, int sign, float mainOffset, float halfTrain, bool includeTailMarker)
+    // 中心線が使えない場合の従来構成(保険)
+    static List<Vector3> LegacyStationRun(Station st, int track, int sign, float mainOffset,
+        float halfTrain, bool includeTailMarker, bool departing)
     {
         var pts = new List<Vector3>();
         float h = st.HalfLen, tf = StationLayout.ThroatLen, L = StationLayout.LeadLen;
         float conv = Mathf.Sign(st.layout.trackOffsets[track]) * 2.3f;
-        pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf))));         // 駅端(リード端、本線側)
-        if (Mathf.Abs(mainOffset - conv) > CrossoverMismatch)
-            pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf - L * 0.5f)))); // 両渡り線で自線側へ
-        pts.Add(st.transform.TransformPoint(new Vector3(conv, 0, sign * (h + tf - L))));           // 収束(自線側±2.3)
-        pts.Add(st.TrackWorldPoint(track, sign * h));                                              // ホーム端
-        pts.Add(st.TrackWorldPoint(track, sign * (h - Station.PlatformEndHold)));                  // 押さえ(上記と同じ理由)
-        pts.Add(st.TrackWorldPoint(track, 0));
         if (includeTailMarker) pts.Add(st.TrackWorldPoint(track, -sign * halfTrain));
+        pts.Add(st.TrackWorldPoint(track, 0));
+        pts.Add(st.TrackWorldPoint(track, sign * (h - Station.PlatformEndHold)));
+        pts.Add(st.TrackWorldPoint(track, sign * h));
+        pts.Add(st.transform.TransformPoint(new Vector3(conv, 0, sign * (h + tf - L))));
+        if (Mathf.Abs(mainOffset - conv) > CrossoverMismatch)
+            pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf - L * 0.5f))));
+        pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf))));
+        if (!departing) pts.Reverse();
         return pts;
     }
+
+    static List<Vector3> StationDeparture(Station st, int track, int sign, float mainOffset, float halfTrain, bool includeTailMarker)
+        => StationRun(st, track, sign, mainOffset, halfTrain, includeTailMarker, departing: true);
+
+    static List<Vector3> StationArrival(Station st, int track, int sign, float mainOffset, float halfTrain, bool includeTailMarker)
+        => StationRun(st, track, sign, mainOffset, halfTrain, includeTailMarker, departing: false);
 
     // 駅from(exitSign方向へ出る)〜駅to(enterSign方向から入る)を結ぶ曲線。
     // mainF/mainTは、それぞれfrom/to自身のローカル座標系で見た曲線端点のオフセット
@@ -767,8 +802,9 @@ public class Train : MonoBehaviour
         Vector3 tan0 = from.Axis * exitSign, tan1 = -(to.Axis * enterSign);
         var curve = RailKit.SmoothConnectPath(endA, tan0, endB, tan1, curveN);
         // 左側通行(実際のレールと同じ規約)。端点は近似接線でなくtan0/tan1そのものを使い、
-        // 駅の自前スロートのレールと厳密に一致させる(列車がレールから見えて外れないため)
-        var curveOffset = RailKit.OffsetWithEndTangents(curve, 2.3f, tan0, tan1);
+        // 駅の自前スロートのレールと厳密に一致させる。平滑化まで含めてTrackSegment.SideCentre
+        // と同じ手順にしてあるので、敷かれたレールと同一の線になる
+        var curveOffset = RailKit.Chaikin(RailKit.OffsetWithEndTangents(curve, 2.3f, tan0, tan1), 2);
         mainF = from.transform.InverseTransformPoint(curveOffset[0]).x;
         mainT = to.transform.InverseTransformPoint(curveOffset[curveOffset.Count - 1]).x;
         return curveOffset;
@@ -804,6 +840,15 @@ public class Train : MonoBehaviour
             pts.AddRange(curve);
             pts.AddRange(StationArrival(wb.st, wb.track, wb.enterSign, mainT, halfTrain, isTrueDestination));
         }
-        return RailKit.Chaikin(pts, 2);
+        // ここでChaikinを掛け直さない。駅構内は描画済みの中心線(平滑化済み)、駅間は
+        // SmoothConnectPathの曲線をそのまま使っており、再平滑化するとレールから
+        // 外れてしまう(まさにそれが「列車だけ浮く」原因だった)。
+        // 継ぎ目は駅端で接線が一致しているので、掛け直さなくても折れない。
+        //
+        // ただし、切り貼りしただけでは区間長が「ホーム部分は数十m、カーブは数十cm」と
+        // 百倍以上ばらつく。長い区間は将来の縦カーブ(高架・地下)を串刺しにして
+        // ショートカットするため、最後に一定間隔で取り直す。元の線の上を通るので
+        // レールからは外れない
+        return RailKit.Resample(pts, PathSampleSpacing);
     }
 }
