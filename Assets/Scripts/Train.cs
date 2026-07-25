@@ -746,15 +746,31 @@ public class Train : MonoBehaviour
         // 両渡り線を渡って本線側へ移る。Station側が同じ位置に渡り線を描いている
         if (Mathf.Abs(mainOffset - conv) > CrossoverMismatch)
         {
-            float zLeadStart = sign * (h + tf - L);
-            for (int i = 0; i < local.Count; i++)
-            {
-                var p = local[i];
-                // InverseLerpは範囲の大小が逆でも(sign<0でも)正しく0→1を返す
-                float t = Mathf.InverseLerp(zLeadStart, zEnd, p.z);
-                if (t <= 0f) continue;
-                local[i] = new Vector3(Mathf.Lerp(p.x, mainOffset, Mathf.Clamp01(t)), p.y, p.z);
-            }
+            // 描画された渡り線(Station.RebuildTrackVisualのAddCrossover)と同じS字を辿る。
+            // 位置・長さ・曲線の作り方をRailKit側と揃えているので、列車はレールの上を通る
+            // (以前はリード区間全体を線形に横切っており、描かれた分岐から最大1.7m外れていた)
+            float czCross = sign * (h + tf - L * 0.5f);         // 渡り線の中心z
+            float dHalf = RailKit.CrossoverHalfLength;
+            var from = new Vector3(conv, 0f, czCross - sign * dHalf);
+            var to = new Vector3(mainOffset, 0f, czCross + sign * dHalf);
+            var cross = RailKit.CrossoverPath(from, to, new Vector3(0f, 0f, sign));
+            // 既存点のxを曲線から取るだけでは、リード区間の点が疎なので点と点の間が
+            // 弦になってカーブを内側で切ってしまう(実測0.14m)。渡り線区間は曲線の点
+            // そのものへ差し替え、前後は自線側/本線側の直線にする
+            // crossは常に「自線側→本線側」(出発向き)で作られる。到着時のlocalは
+            // 駅端→ホームの順なので、いったん出発向きへ揃えて組み、最後に戻す。
+            // 揃えずに組むと到着経路の点順が壊れ、駅構内で経路が飛ぶ
+            float zA = cross[0].z, zB = cross[cross.Count - 1].z;
+            var ordered = new List<Vector3>(local);
+            if (!departing) ordered.Reverse();
+            var rebuilt = new List<Vector3>(ordered.Count + cross.Count);
+            foreach (var p in ordered)
+                if ((p.z - zA) * sign < 0f) rebuilt.Add(new Vector3(conv, p.y, p.z));
+            foreach (var c in cross) rebuilt.Add(c);
+            foreach (var p in ordered)
+                if ((p.z - zB) * sign > 0f) rebuilt.Add(new Vector3(mainOffset, p.y, p.z));
+            if (!departing) rebuilt.Reverse();
+            local = rebuilt;
         }
 
         var pts = new List<Vector3>(local.Count);

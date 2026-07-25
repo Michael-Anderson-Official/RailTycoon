@@ -328,7 +328,7 @@ public static class RailKit
         var perp = Vector3.Cross(Vector3.up, dir).normalized;
         // 分岐長。リード区間(LeadLen=30m)に収まる範囲で長く取り、実物のように
         // 緩い角度で開かせる(短いと急な折れ線に見える)
-        const float g = Gauge, ry = RailTop, d = 13f;
+        const float g = Gauge, ry = RailTop, d = CrossoverHalfLength;
         const float half = RailDimensions.MainTrackOffset;
         var up = Vector3.up;
 
@@ -370,6 +370,10 @@ public static class RailKit
 
     // 渡り線1本の中心線。両端が直進本線と同じ向き(dir)で出入りするS字。
     // 描画も、将来的に列車の通り道も、この同じ関数から得ることで形が食い違わない
+    // 渡り線1本の分岐長(中心から片側)。描画(AddCrossover)と、列車が渡るときの
+    // 走行経路(Train)が同じ区間を使うために共有する
+    public const float CrossoverHalfLength = 13f;
+
     public static List<Vector3> CrossoverPath(Vector3 from, Vector3 to, Vector3 dir, int n = 24)
     {
         // 接線を弦長の0.62倍まで伸ばす。短いと分岐の付け根で急に曲がってしまい、

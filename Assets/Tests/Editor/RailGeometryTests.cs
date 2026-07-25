@@ -276,6 +276,153 @@ public class RailGeometryTests
             "ホーム区間では走行経路が線路中心から外れないこと(ズレ" + maxDev.ToString("F2") + "m)");
     }
 
+    // ---- 走行経路が実際に敷かれたレールの上を通ること ----
+    // 保証は2段に分けて確かめる。
+    //  (A) 描画されたレールメッシュが、駅が保持する中心線どおりに敷かれている
+    //  (B) 走行経路がその中心線の上を通る
+    // (A)+(B)で「走行経路は描画されたレールの上」が言える。
+    // (B)だけだと、描画側が中心線と無関係な位置へ敷かれる退行を検出できない
+    // (Codexレビューでの指摘)。
+    // なお(A)を「経路点から最寄りのレール頂点までの距離」で測ってはいけない。
+    // レール頂点はホーム区間で数十m間隔しかなく、頂点間の中点で最大25m程度になる。
+    // 中心線の各点に対してはレール頂点が必ず生成されるので、そちらを起点に測る
+
+    static float DistanceToPolyline(Vector3 p, List<Vector3> line)
+    {
+        float best = float.MaxValue;
+        for (int i = 0; i + 1 < line.Count; i++)
+        {
+            Vector3 s0 = line[i], e = line[i + 1], d = e - s0;
+            float len2 = d.sqrMagnitude;
+            float t = len2 < 1e-6f ? 0f : Mathf.Clamp01(Vector3.Dot(p - s0, d) / len2);
+            best = Mathf.Min(best, Vector3.Distance(p, s0 + d * t));
+        }
+        return best;
+    }
+
+    static List<Vector3> MeshPointsOf(Transform t)
+    {
+        var pts = new List<Vector3>();
+        if (t == null) return pts;
+        var mf = t.GetComponent<MeshFilter>();
+        if (mf == null || mf.sharedMesh == null) return pts;
+        foreach (var v in mf.sharedMesh.vertices) pts.Add(t.TransformPoint(v));
+        return pts;
+    }
+
+    [TestCase(2, 2)]
+    [TestCase(2, 4)]
+    [TestCase(4, 8)]
+    public void DrawnRailMesh_FollowsTheStoredCentreLine(int faces, int lines)
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, faces, lines, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 1400), 0, 10, faces, lines, "B");
+        EditModeTestHelpers.Connect(a, b);
+        a.RebuildTrackVisual();
+
+        var railPts = MeshPointsOf(a.transform.Find("TrackWork/Rail"));
+        Assert.That(railPts.Count, Is.GreaterThan(0), "レールメッシュが生成されていること");
+
+        // 中心線の各点にはレール頂点が軌間の半分だけ離れて生成される。
+        // 描画が中心線から外れたらこの距離が崩れる
+        // ホーム区間だけを見る。スロートには渡り線が同じメッシュへ描かれており、
+        // 斜めの分岐が他の線の中心線近くを通るため「最寄り頂点=軌間の半分」が成り立たない
+        float platHalf = a.cars * StationLayout.CarLength * 0.5f;
+        // レールは幅を持つスラブなので、頂点は中心から軌間±(レール半幅)に出る。
+        // 底部フランジの半幅0.075を含めた許容を見込む
+        const float railHalfWidth = 0.075f;
+        float worst = 0f;
+        int checkedPts = 0;
+        for (int i = 0; i < a.layout.trackOffsets.Length; i++)
+        {
+            var centre = a.TrackCentreLocal(i);
+            Assert.That(centre, Is.Not.Null);
+            foreach (var lp in centre)
+            {
+                if (Mathf.Abs(lp.z) > platHalf) continue;
+                checkedPts++;
+                var w = a.transform.TransformPoint(lp);
+                float best = float.MaxValue;
+                foreach (var r in railPts)
+                {
+                    float dx = w.x - r.x, dz = w.z - r.z;
+                    best = Mathf.Min(best, Mathf.Sqrt(dx * dx + dz * dz));
+                }
+                worst = Mathf.Max(worst, Mathf.Abs(best - RailKit.Gauge));
+            }
+        }
+        Assert.That(checkedPts, Is.GreaterThan(0), "ホーム区間の中心線点があること");
+        Assert.That(worst, Is.LessThanOrEqualTo(railHalfWidth + 0.01f),
+            "レールが中心線から軌間の半分だけ離れて敷かれていること(ズレ" + worst.ToString("F3") + "m)");
+    }
+
+    [TestCase(2, 2)]
+    [TestCase(2, 4)]
+    [TestCase(4, 8)]
+    public void TrainLegRunsOnTheStoredCentreLine(int faces, int lines)
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, faces, lines, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 1400), 0, 10, faces, lines, "B");
+        var seg = EditModeTestHelpers.Connect(a, b);
+        a.RebuildTrackVisual(); b.RebuildTrackVisual();
+
+        // 中心線(駅構内の各線 + 駅間の左右)と、渡り線のS字を許容経路とする
+        var rails = new List<List<Vector3>>();
+        foreach (var st in new[] { a, b })
+            for (int i = 0; i < st.layout.trackOffsets.Length; i++)
+            {
+                var loc = st.TrackCentreLocal(i);
+                if (loc == null) continue;
+                var w = new List<Vector3>();
+                foreach (var p in loc) w.Add(st.transform.TransformPoint(p));
+                rails.Add(w);
+            }
+        rails.Add(seg.SideCentre(TrackSegment.TrackOffset));
+        rails.Add(seg.SideCentre(-TrackSegment.TrackOffset));
+        foreach (var st in new[] { a, b })
+            foreach (int sign in new[] { -1, 1 })
+            {
+                float cz = sign * (st.HalfLen + StationLayout.ThroatLen - StationLayout.LeadLen * 0.5f);
+                float d = RailKit.CrossoverHalfLength;
+                float off = RailDimensions.MainTrackOffset;
+                rails.Add(RailKit.CrossoverPath(
+                    st.transform.TransformPoint(new Vector3(off, 0, cz - sign * d)),
+                    st.transform.TransformPoint(new Vector3(-off, 0, cz + sign * d)),
+                    st.Axis * sign));
+                rails.Add(RailKit.CrossoverPath(
+                    st.transform.TransformPoint(new Vector3(-off, 0, cz - sign * d)),
+                    st.transform.TransformPoint(new Vector3(off, 0, cz + sign * d)),
+                    st.Axis * sign));
+            }
+
+        // 出発側・到着側それぞれで、渡り線が要る番線と要らない番線の全組み合わせを見る
+        // (到着側の渡り線を通る組み合わせを外すと、到着経路の点順が壊れる不具合を見逃す)
+        foreach (int ta in new[] { a.layout.stopTracks[0], a.layout.stopTracks[a.layout.stopTracks.Count - 1] })
+            foreach (int tb in new[] { b.layout.stopTracks[0], b.layout.stopTracks[b.layout.stopTracks.Count - 1] })
+            {
+                var leg = Train.BuildLeg(a, ta, seg.SignAt(a), b, tb, seg.SignAt(b), 100f);
+                string what = "発" + ta + "→着" + tb + ": ";
+
+                float worst = 0f;
+                foreach (var p in leg)
+                {
+                    float best = float.MaxValue;
+                    foreach (var r in rails) best = Mathf.Min(best, DistanceToPolyline(p, r));
+                    worst = Mathf.Max(worst, best);
+                }
+                Assert.That(worst, Is.LessThan(0.05f),
+                    what + "走行経路が線路の中心線(渡り線を含む)から外れないこと(最大"
+                    + worst.ToString("F3") + "m)");
+
+                // 点順が壊れると経路が飛ぶ。連続していることを区間長で見る
+                float longest = 0f;
+                for (int i = 0; i + 1 < leg.Count; i++)
+                    longest = Mathf.Max(longest, Vector3.Distance(leg[i], leg[i + 1]));
+                Assert.That(longest, Is.LessThan(5f),
+                    what + "経路が途中で飛ばないこと(最大区間長" + longest.ToString("F1") + "m)");
+            }
+    }
+
     // ---- 渡り線の分岐形状 ----
     // 直線の対角線で引くと、直進本線との付け根で線路が10°折れる。
     // 実物のように両端が本線へ接するS字で開くこと
