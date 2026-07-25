@@ -204,6 +204,8 @@ public class BuildController : MonoBehaviour
             UIController.Toast("先に地面をタップして位置を選んでください");
             return;
         }
+        string blocked = DescribePlacementObstruction(previewStation, null);
+        if (blocked != null) { UIController.Toast(blocked); return; }
         double cost = GameState.StationCost(pCars, pFaces, pLines);
         if (!GameState.Spend(cost))
         {
@@ -223,6 +225,44 @@ public class BuildController : MonoBehaviour
         SaveLoad.Save();
         UIController.Toast(st.stationName + "を建設(" + (cost / 1e8).ToString("F1") + "億円)");
     }
+
+    // 駅を建てる/建て替える位置が、既存の駅や既設の線路と衝突していないか。
+    // 衝突していれば理由の文言、問題なければnullを返す。
+    // ignoreStation は建て替え対象(自分自身と、自分へ繋がる線路は除外する)
+    public static string DescribePlacementObstruction(Station candidate, Station ignoreStation)
+    {
+        if (candidate == null || candidate.layout.trackOffsets == null) return null;
+
+        // 駅どうしの重なり。構内(番線・ホーム)が触れるほど近いと線路も引けないので弾く
+        foreach (var other in TrackNetwork.stations)
+        {
+            if (other == null || other == candidate || other == ignoreStation || other.preview) continue;
+            if (Station.FootprintsOverlap(candidate, other, StationClearance))
+                return other.stationName + "と近すぎます(駅どうしが重なります)";
+        }
+
+        // 既設の線路との衝突。線路の道床が駅構内へ入り込む位置には建てられない
+        foreach (var seg in TrackNetwork.segments)
+        {
+            if (seg == null || seg.a == null || seg.b == null) continue;
+            if (ignoreStation != null && (seg.a == ignoreStation || seg.b == ignoreStation)) continue;
+            var center = seg.CenterPoints();
+            for (int i = 0; i + 1 < center.Count; i++)
+            {
+                const int sub = 4;
+                for (int k = 0; k < sub; k++)
+                {
+                    var p = Vector3.Lerp(center[i], center[i + 1], k / (float)sub);
+                    if (candidate.FootprintContains(p, TrackSegment.HalfCorridorWidth))
+                        return seg.a.stationName + "〜" + seg.b.stationName + "の線路と重なります";
+                }
+            }
+        }
+        return null;
+    }
+
+    // 駅どうしを離す最小限の余裕(構内の外側にこれだけ空ける)
+    public const float StationClearance = 8f;
 
     // ---- 駅の建て替え・撤去 ----
 
@@ -244,6 +284,10 @@ public class BuildController : MonoBehaviour
     {
         var st = rebuildTarget;
         if (st == null) return;
+        // 建て替えで大きくなる場合、隣の駅や既設線路へめり込むことがある
+        // (自分自身と、自分に繋がる線路は当然重なるので除外する)
+        string blocked = DescribePlacementObstruction(previewStation, st);
+        if (blocked != null) { UIController.Toast(blocked); return; }
         if (!RebuildStation(st, pCars, pFaces, pLines)) return; // 資金不足時は建て替えモード継続
         rebuildTarget = null;
         if (previewStation != null) { Destroy(previewStation.gameObject); previewStation = null; }

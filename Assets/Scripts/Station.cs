@@ -108,6 +108,26 @@ public class Station : MonoBehaviour
                 new Vector3(visualW - 0.04f, surfaceThick, platLen - 0.35f),
                 Quaternion.identity);
 
+            // 実物のホームは終端で線路の収束に合わせて細くなる。列車が停まる範囲
+            // (=platLen、編成長と同じ)は全幅のまま残し、そこから駅端(HalfLen)までの
+            // 余地へ絞った端部を継ぎ足す。全幅部を削らないので停車時にホームとの
+            // 隙間は広がらない
+            float apronLen = HalfLen - platLen * 0.5f;
+            if (apronLen > 0.5f)
+            {
+                float tipHalfW = Mathf.Max(1.1f, visualW * 0.34f);
+                for (int endSign = -1; endSign <= 1; endSign += 2)
+                {
+                    float z0 = endSign * platLen * 0.5f;
+                    float z1 = endSign * (HalfLen - 0.3f);
+                    AddTaperedApron(platformBase, p.x, z0, z1,
+                        visualW * 0.5f, tipHalfW, 0f, baseTop);
+                    AddTaperedApron(platformSurface, p.x, z0, z1,
+                        visualW * 0.5f - 0.02f, tipHalfW - 0.02f,
+                        RailDimensions.PlatformTop - surfaceThick, RailDimensions.PlatformTop);
+                }
+            }
+
             foreach (var e in layout.edges)
             {
                 if (e.platformIndex != pi) continue;
@@ -361,6 +381,31 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("SwitchBox", swBox.ToMesh(), MatLib.Get("SwitchBox"), tw.transform);
     }
 
+    // ホーム端の絞り(z0側が全幅halfW0、z1側が細いhalfW1)。yBottom..yTopの角柱を
+    // AddBoxと同じ頂点順(bit0=x, bit1=y, bit2=z)で組む
+    static void AddTaperedApron(RailKit.MeshData md, float centerX, float z0, float z1,
+        float halfW0, float halfW1, float yBottom, float yTop)
+    {
+        var c = new Vector3[8];
+        for (int i = 0; i < 8; i++)
+        {
+            bool farEnd = (i & 4) != 0;
+            float z = farEnd ? z1 : z0;
+            float hw = farEnd ? halfW1 : halfW0;
+            c[i] = new Vector3(
+                centerX + ((i & 1) == 0 ? -hw : hw),
+                (i & 2) == 0 ? yBottom : yTop,
+                z);
+        }
+        // z0>z1(-側の端部)ではzの前後が反転し面が裏返るので、頂点順を入れ替える
+        if (z1 < z0)
+            for (int i = 0; i < 4; i++)
+            {
+                var tmp = c[i]; c[i] = c[i + 4]; c[i + 4] = tmp;
+            }
+        RailKit.AddHexahedron(md, c);
+    }
+
     // ワールド座標の点が、この駅のホーム躯体の平面範囲(marginだけ広げたもの)に
     // 入っているか。駅間の線路が途中の駅のホームを貫通しないか判定するのに使う
     // (TrackSegmentは両端の駅しか見ないため、間に別の駅があっても素通しで描画される)。
@@ -378,6 +423,40 @@ public class Station : MonoBehaviour
             if (Mathf.Abs(local.x - p.x) <= visualW * 0.5f + margin) return true;
         }
         return false;
+    }
+
+    // ---- 建設時の当たり判定 ----
+    // 駅が平面上で占有する矩形(構内の幅×駅長)。ホーム範囲(PlatformAreaContains)より
+    // 広く、番線・ホーム全体を含む。駅どうしの重なりや、既設線路との衝突判定に使う
+    public float FootprintHalfWidth => layout.trackOffsets == null ? 0f : layout.totalWidth * 0.5f;
+    public float FootprintHalfLength => HalfLen;
+
+    public bool FootprintContains(Vector3 world, float margin)
+    {
+        if (layout.trackOffsets == null) return false;
+        var local = transform.InverseTransformPoint(world);
+        return Mathf.Abs(local.x) <= FootprintHalfWidth + margin
+            && Mathf.Abs(local.z) <= FootprintHalfLength + margin;
+    }
+
+    // 2駅の占有矩形(それぞれ任意の向き)が平面上で重なるか。分離軸定理で厳密に見る
+    // (4隅の内包判定だけでは、十字に交差する配置を取りこぼすため)
+    public static bool FootprintsOverlap(Station a, Station b, float margin)
+    {
+        if (a == null || b == null) return false;
+        if (a.layout.trackOffsets == null || b.layout.trackOffsets == null) return false;
+        Vector3 ax = a.transform.right, az = a.transform.forward;
+        Vector3 bx = b.transform.right, bz = b.transform.forward;
+        float ahx = a.FootprintHalfWidth + margin * 0.5f, ahz = a.FootprintHalfLength + margin * 0.5f;
+        float bhx = b.FootprintHalfWidth + margin * 0.5f, bhz = b.FootprintHalfLength + margin * 0.5f;
+        Vector3 d = b.transform.position - a.transform.position;
+        foreach (var axis in new[] { ax, az, bx, bz })
+        {
+            float ra = Mathf.Abs(Vector3.Dot(ax, axis)) * ahx + Mathf.Abs(Vector3.Dot(az, axis)) * ahz;
+            float rb = Mathf.Abs(Vector3.Dot(bx, axis)) * bhx + Mathf.Abs(Vector3.Dot(bz, axis)) * bhz;
+            if (Mathf.Abs(Vector3.Dot(d, axis)) > ra + rb) return false;
+        }
+        return true;
     }
 
     public Vector3 TrackWorldPoint(int trackIdx, float z)

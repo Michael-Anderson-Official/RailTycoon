@@ -51,6 +51,13 @@ public static class RailKit
                 ((i & 1) == 0 ? -h.x : h.x),
                 ((i & 2) == 0 ? -h.y : h.y),
                 ((i & 4) == 0 ? -h.z : h.z));
+        AddHexahedron(md, c);
+    }
+
+    // AddBoxと同じ頂点順(bit0=x, bit1=y, bit2=z)で8隅を直接指定する六面体。
+    // ホーム端の絞りのように、断面が場所によって変わる箱を作るのに使う
+    public static void AddHexahedron(MeshData md, Vector3[] c)
+    {
         for (int f = 0; f < 6; f++)
         {
             int b = md.v.Count;

@@ -10,17 +10,16 @@ Unity 6 (6000.3.20f1)製、京王線モデルの鉄道経営シミュレーシ�
 全てコード生成(prefab無し)。決定的な固定tickシミュレーション(`Bootstrap.TickSeconds`)。
 Unityエディタ本体: `C:\Program Files\Unity\Hub\Editor\6000.3.20f1\Editor\Unity.exe`
 
-## 2026-07-25引き継ぎ時点
+## 2026-07-25時点の状況
 
-- `origin/master`: `3113829`（UI/UX全面刷新、駅・線路・車両の実寸統一、起動通知修正までpush済み）
-- `gh-pages`: `7bc1ff4`（`master 885593a`相当）。上記の最新UI/実寸化は**未デプロイ**
-- `Builds/WebGL`は最新ビルド試行後の未コミット変更がある。直近の`master 3113829`ビルドは
-  `wasm-opt`が終了コード`3221226505`で落ちて失敗したため、**現状の生成物をそのまま
-  gh-pagesへコミットしないこと**。`Logs/webglbuild.log`を確認し、ビルドを最初から
-  再実行して`WebGLBuild: Succeeded`を得てから公開する
-- ひとつ前の`master c617fea`ではWebGLビルド自体は成功し、PC 1440×900とスマホ
-  390×844のローカルChrome表示まで確認済み。ただし、その後に起動トーストと
-  オンボーディングの重なりを`3113829`で直したため、最終版のブラウザ再確認が必要
+- `master`と`gh-pages`は同期済み(masterの内容がそのまま公開ページに反映されている)。
+  以前あった「UI刷新が未デプロイ」「wasm-opt異常終了で失敗した生成物が残っている」
+  という積み残しは解消済み
+- `wasm-opt`異常終了・Brotliの`not enough memory`は、このPCの空きメモリ逼迫
+  (物理7.65GBで空き1GB前後)による一時的な失敗。**コード起因ではない**ので、
+  失敗しても中途生成物はコミットせずビルドを再実行すれば通る
+- 残っている実機確認: UI/UX刷新以降のブラウザ実操作(下記「変更→検証」の4項)。
+  特に起動トースト表示中にオンボーディングのアクションを押せるか
 
 ## 変更→検証→コミットの手順
 
@@ -29,7 +28,7 @@ Unityエディタ本体: `C:\Program Files\Unity\Hub\Editor\6000.3.20f1\Editor\U
 ```
 Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults "Logs/edittest.xml" -logFile "Logs/edittest.log"
 ```
-   結果は`Logs/edittest.xml`の`<test-run ... failed="0" ...>`で確認する(現在142件PASS
+   結果は`Logs/edittest.xml`の`<test-run ... failed="0" ...>`で確認する(現在149件PASS
    +1件Ignore)。
 2. 起動経路とコード生成UIを触る変更ではPlayModeも必ず実行する(現在3件PASS):
 ```
@@ -114,7 +113,9 @@ git push https://github.com/Michael-Anderson-Official/RailTycoon.git master:gh-p
 ## Codexレビュー
 
 ユーザーはCodexによる実装後レビューを毎回入れる運用を希望している(利用上限に
-達している場合はスキップしてよいが、その旨を明示すること)。`c617fea`の全面変更は
+達している場合はスキップしてよいが、その旨を明示すること)。
+**2026-07-25にstop前の自動レビューゲートを有効化済み**(`/codex:setup --enable-review-gate`)。
+以後は作業の区切りで自動的にレビューが走る。`c617fea`の全面変更は
 複数回レビューし、Materialリーク、運転台高さ、トースト入力、横画面モーダル、
 縦画面の全体表示FOVを修正した後に「actionable regressionなし」を確認済み。
 `3113829`も追加レビューで指摘なし。これらより前のコミット群(台車追従修正〜
@@ -153,8 +154,12 @@ git push https://github.com/Michael-Anderson-Official/RailTycoon.git master:gh-p
 - UIは見た目のスクリーンショットだけでなく、トースト表示中のタップや縦横切替後の
   実操作まで確認する
 
-## 直近の変更(このセッションでの作業、新しい順)
+## 直近の変更(新しい順)
 
+- ホーム端を線路の収束に合わせて絞り、駅を建てる位置に当たり判定を追加
+  (既存駅・既設線路との重なりを建設時に拒否)
+- 駅間の線路が途中の駅のホームを貫通する問題を建設時に防止(`3b4a2ef`)。
+  再現条件は「間に別の駅があるのに両側の駅を1本の線路で直結した場合」
 - 起動トーストをオンボーディングの上へ退避し、初回アクションを即操作可能化(`3113829`)
 - UI/UXを全面刷新。セーフエリア対応HUD、下部ナビ、段階式の駅/線路/系統操作、
   スクロール一覧、カメラツール、確認ダイアログ、初心者ガイドを追加(`c617fea`)

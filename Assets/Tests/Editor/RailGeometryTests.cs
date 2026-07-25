@@ -207,4 +207,65 @@ public class RailGeometryTests
 
         Assert.That(CrossedBy(a, b), Is.Null, "駅の向きが接続方向とズレていても誤検出しないこと");
     }
+
+    // ---- 駅を建てる位置の当たり判定 ----
+    // 既存の駅や既設の線路へ重ねて建てられてしまうと、ホームや道床がめり込んで描画される
+
+    // TrackNetworkへ登録しない、建設プレビュー相当の駅を作る
+    Station MakeCandidate(Vector3 pos, float yaw, int cars = 10, int faces = 2, int lines = 2)
+    {
+        var go = new GameObject("Candidate");
+        go.transform.SetParent(BuildController.WorldRoot, false);
+        go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0, yaw, 0));
+        var st = go.AddComponent<Station>();
+        st.preview = true;
+        st.cars = cars; st.faces = faces; st.lines = lines; st.stationName = "(予定)";
+        st.Build();
+        roots.Add(go);
+        return st;
+    }
+
+    [Test]
+    public void StationPlacement_OverlappingAnotherStation_IsRejected()
+    {
+        EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var candidate = MakeCandidate(new Vector3(12, 0, 30), 0);
+
+        Assert.That(BuildController.DescribePlacementObstruction(candidate, null),
+            Is.Not.Null, "既存駅と重なる位置には建てられないこと");
+    }
+
+    [Test]
+    public void StationPlacement_ClearOfEverything_IsAllowed()
+    {
+        EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var candidate = MakeCandidate(new Vector3(0, 0, 450), 0);
+
+        Assert.That(BuildController.DescribePlacementObstruction(candidate, null),
+            Is.Null, "十分離れた位置は建てられること");
+    }
+
+    [Test]
+    public void StationPlacement_OnExistingTrack_IsRejected()
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 900), 0, 10, 2, 2, "B");
+        EditModeTestHelpers.Connect(a, b);
+        var candidate = MakeCandidate(new Vector3(0, 0, 450), 0);
+
+        Assert.That(BuildController.DescribePlacementObstruction(candidate, null),
+            Is.Not.Null, "既設線路の上には建てられないこと");
+    }
+
+    [Test]
+    public void StationPlacement_BesideExistingTrack_IsAllowed()
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 900), 0, 10, 2, 2, "B");
+        EditModeTestHelpers.Connect(a, b);
+        var candidate = MakeCandidate(new Vector3(220, 0, 450), 0);
+
+        Assert.That(BuildController.DescribePlacementObstruction(candidate, null),
+            Is.Null, "線路の脇へ十分離して建てるのは許可されること");
+    }
 }

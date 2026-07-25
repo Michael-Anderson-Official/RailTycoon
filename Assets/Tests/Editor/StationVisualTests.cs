@@ -98,4 +98,38 @@ public class StationVisualTests
             Assert.That(count, Is.EqualTo(1), root + "が再構築後に重複しないこと");
         }
     }
+
+    // ---- ホーム端の絞り ----
+    // 実物のホームは終端で線路の収束に合わせて細くなる。ただし列車が停まる範囲
+    // (編成長=platLen)を削ってしまうとホームとの隙間が広がるので、そこは全幅を保つ
+
+    [TestCase(2, 2)]
+    [TestCase(1, 2)]
+    [TestCase(2, 4)]
+    public void PlatformEnds_TaperBeyondTrainStoppingRange(int faces, int lines)
+    {
+        var station = MakeStation(cars: 10, faces: faces, lines: lines);
+        var mesh = AssertMesh(station, "PlatformBase");
+        float platLen = station.cars * StationLayout.CarLength;
+        var p = station.layout.platforms[0];
+
+        float fullHalf = 0f, tipHalf = float.MaxValue, maxAbsZ = 0f;
+        foreach (var v in mesh.vertices)
+        {
+            // 最初のホームだけを見る(左右で対称なので1枚で十分)
+            if (Mathf.Abs(v.x - p.x) > p.y) continue;
+            float half = Mathf.Abs(v.x - p.x);
+            maxAbsZ = Mathf.Max(maxAbsZ, Mathf.Abs(v.z));
+            if (Mathf.Abs(v.z) <= platLen * 0.5f + 0.01f) fullHalf = Mathf.Max(fullHalf, half);
+            if (Mathf.Abs(v.z) >= station.HalfLen - 0.4f) tipHalf = Mathf.Min(tipHalf, half);
+        }
+
+        Assert.That(fullHalf, Is.EqualTo((p.y - 0.02f) * 0.5f).Within(0.05f),
+            "列車が停まる範囲(編成長)は全幅を保つこと");
+        Assert.That(tipHalf, Is.LessThan(fullHalf - 0.5f), "ホーム端が絞られていること");
+        Assert.That(maxAbsZ, Is.GreaterThan(platLen * 0.5f + 0.5f),
+            "絞った端部は本体より先(駅端側)へ伸びること");
+        Assert.That(maxAbsZ, Is.LessThanOrEqualTo(station.HalfLen + 0.01f),
+            "ホームが駅端(スロートの始まり)を越えないこと");
+    }
 }
