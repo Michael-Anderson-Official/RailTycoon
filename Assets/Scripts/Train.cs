@@ -699,6 +699,10 @@ public class Train : MonoBehaviour
     // 必要がある、という判定に使うしきい値
     const float CrossoverMismatch = 0.1f;
 
+    // 走行経路を最後に取り直す間隔。台車のサンプル窓(BogieSampleWindow=1.5m)より
+    // 十分細かくし、かつ点数が増えすぎない値
+    const float PathSampleSpacing = 1.0f;
+
     // 駅stを出て(またはそこへ入って)signの向きの区間へ抜けるまでの点列を作る部品。
     // BuildLeg/BuildMultiLegから共通で使う(通過駅では停止位置マーカー(タップ余白)を
     // 省き、ホーム中心のみで繋ぐ)。mainOffsetは接続先(駅間カーブ)の端点をst基準の
@@ -825,7 +829,12 @@ public class Train : MonoBehaviour
         // ここでChaikinを掛け直さない。駅構内は描画済みの中心線(平滑化済み)、駅間は
         // SmoothConnectPathの曲線をそのまま使っており、再平滑化するとレールから
         // 外れてしまう(まさにそれが「列車だけ浮く」原因だった)。
-        // 継ぎ目は駅端で接線が一致しているので、掛け直さなくても折れない
-        return pts;
+        // 継ぎ目は駅端で接線が一致しているので、掛け直さなくても折れない。
+        //
+        // ただし、切り貼りしただけでは区間長が「ホーム部分は数十m、カーブは数十cm」と
+        // 百倍以上ばらつく。長い区間は将来の縦カーブ(高架・地下)を串刺しにして
+        // ショートカットするため、最後に一定間隔で取り直す。元の線の上を通るので
+        // レールからは外れない
+        return RailKit.Resample(pts, PathSampleSpacing);
     }
 }

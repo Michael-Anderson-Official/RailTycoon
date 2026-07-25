@@ -421,6 +421,36 @@ public static class RailKit
         return c;
     }
 
+    // ポリライン上を一定間隔で取り直す。元の線の上を通るので形は変わらない
+    // (レールの中心線を切り貼りして作った走行経路の後処理に使う)。
+    // 目的は区間長を揃えること: 継ぎ足しただけの経路は「駅のホーム部分は数十m、
+    // カーブ部分は数十cm」のように区間長が百倍以上ばらつき、長い区間が将来の
+    // 縦カーブ(高架・地下)を串刺しにショートカットしてしまう。
+    // 弧長0の重複点もここで落ちる
+    public static List<Vector3> Resample(List<Vector3> pts, float spacing)
+    {
+        var outPts = new List<Vector3>();
+        if (pts == null || pts.Count == 0) return outPts;
+        if (pts.Count == 1 || spacing <= 1e-4f) { outPts.AddRange(pts); return outPts; }
+        float total = PathLength(pts);
+        if (total < 1e-4f) { outPts.Add(pts[0]); return outPts; }
+
+        int n = Mathf.Max(1, Mathf.RoundToInt(total / spacing));
+        var cum = Cumulative(pts);
+        int seg = 0;
+        outPts.Add(pts[0]);
+        for (int i = 1; i < n; i++)
+        {
+            float target = total * i / n;
+            while (seg + 2 < pts.Count && cum[seg + 1] < target) seg++;
+            float span = cum[seg + 1] - cum[seg];
+            float t = span < 1e-6f ? 0f : (target - cum[seg]) / span;
+            outPts.Add(Vector3.Lerp(pts[seg], pts[seg + 1], Mathf.Clamp01(t)));
+        }
+        outPts.Add(pts[pts.Count - 1]);
+        return outPts;
+    }
+
     public static float PathLength(List<Vector3> pts)
     {
         float l = 0;
