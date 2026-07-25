@@ -78,6 +78,13 @@ public class BootstrapSmokeTest
             "通知表示中も起動案内や地図の操作を遮らないこと");
         foreach (var graphic in toast.GetComponentsInChildren<Graphic>(true))
             Assert.That(graphic.raycastTarget, Is.False);
+        var toastRect = toast.GetComponent<RectTransform>();
+        var nextActionRect = canvas.transform.Find("SafeArea/NextAction")
+            .GetComponent<RectTransform>();
+        Assert.That(toastRect.anchoredPosition.y,
+            Is.GreaterThanOrEqualTo(nextActionRect.anchoredPosition.y +
+                nextActionRect.rect.height + 8f),
+            "起動通知を次アクションボタンの上へ退避して、実ブラウザでも重ねないこと");
 
         var safeArea = canvas.transform.Find("SafeArea").GetComponent<RectTransform>();
         var edgeBox = safeArea.Find("EdgeModal/Box").GetComponent<RectTransform>();

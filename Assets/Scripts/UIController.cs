@@ -1030,6 +1030,7 @@ public class UIController : MonoBehaviour
         }
         onboardingStage = stage;
         onboardingPanel.SetActive(stage >= 0);
+        PositionToast(IsPortrait ? PortraitToolbarHeight : LandscapeToolbarHeight);
         if (stage < 0) return;
         string[] titles =
         {
@@ -1413,7 +1414,6 @@ public class UIController : MonoBehaviour
         toastRt.anchorMin = new Vector2(0.05f, 0f);
         toastRt.anchorMax = new Vector2(0.95f, 0f);
         toastRt.pivot = new Vector2(0.5f, 0f);
-        toastRt.anchoredPosition = new Vector2(0f, bottom + 10f);
         toastRt.sizeDelta = new Vector2(0f, 82f);
 
         onboardingRt.anchorMin = new Vector2(0.06f, 0f);
@@ -1421,6 +1421,7 @@ public class UIController : MonoBehaviour
         onboardingRt.pivot = new Vector2(0.5f, 0f);
         onboardingRt.anchoredPosition = new Vector2(0f, bottom + 12f);
         onboardingRt.sizeDelta = new Vector2(0f, 220f);
+        PositionToast(bottom);
 
         bool placeLeft = !portrait && (BC != null && BC.mode == BuildController.Mode.Train ||
             infoPanel != null && infoPanel.activeSelf);
@@ -1433,6 +1434,15 @@ public class UIController : MonoBehaviour
 
         lastScreenSize = new Vector2Int(Screen.width, Screen.height);
         lastSafeArea = safe;
+    }
+
+    void PositionToast(float bottom)
+    {
+        if (toastRt == null) return;
+        float y = bottom + 10f;
+        if (onboardingPanel != null && onboardingPanel.activeSelf && onboardingRt != null)
+            y = onboardingRt.anchoredPosition.y + onboardingRt.rect.height + 10f;
+        toastRt.anchoredPosition = new Vector2(0f, y);
     }
 
     static void SetBar(RectTransform rt, bool top, float height)
