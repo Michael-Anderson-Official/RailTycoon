@@ -691,7 +691,12 @@ public class BuildController : MonoBehaviour
                 tracks.Add(l.tracks[i]);
             }
         }
-        while (route.Count >= 2 && route[0] == route[route.Count - 1])
+        // 起点へ戻ってくる経路の末尾は、番線まで同じなら重複なので削る(A→B→C→Aを
+        // A→B→Cにして巡回運転にする従来の意図)。
+        // ただし番線が違う場合は「折返して別の番線へ入る」という意図的な指定なので
+        // 残す。削ると復路の番線指定が消えてしまう
+        while (route.Count >= 3 && route[0] == route[route.Count - 1]
+               && tracks[0] == tracks[tracks.Count - 1])
         {
             route.RemoveAt(route.Count - 1);
             tracks.RemoveAt(tracks.Count - 1);

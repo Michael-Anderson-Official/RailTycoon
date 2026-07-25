@@ -42,6 +42,54 @@ public class SkipStopTests
     // ---- 折返し(同じ駅へ戻る系統) ----
     // 経路に同じ駅を2回入れられ、往路と復路で別の番線を指定できること
 
+    // 実際の配車はBuildItinerary経由で経路を組む。Train.Initを直接呼ぶ検証だけでは
+    // この経路を通らないため、末尾が削られて復路の番線指定が消える不具合を見逃した
+    [Test]
+    public void BuildItinerary_KeepsReturnStopWhenItsTrackDiffers()
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 1400), 0, 10, 2, 2, "B");
+        EditModeTestHelpers.Connect(a, b);
+        int outbound = a.layout.stopTracks[0];
+        int inbound = a.layout.stopTracks[a.layout.stopTracks.Count - 1];
+        Assert.That(outbound, Is.Not.EqualTo(inbound));
+
+        var line = new ServiceLine
+        {
+            id = 1,
+            route = new List<Station> { a, b, a },
+            tracks = new List<int> { outbound, b.StopTracks[0], inbound },
+        };
+        BuildController.BuildItinerary(new List<ServiceLine> { line },
+            out var route, out var tracks, out _);
+
+        Assert.That(route.Count, Is.EqualTo(3), "折返しの復路が削られないこと");
+        Assert.That(route[2], Is.EqualTo(a));
+        Assert.That(tracks[2], Is.EqualTo(inbound), "復路の番線指定が残ること");
+    }
+
+    // 番線まで同じ末尾は従来どおり重複として削り、巡回運転にする
+    [Test]
+    public void BuildItinerary_TrimsReturnStopWhenTrackIsIdentical()
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 1400), 0, 10, 2, 2, "B");
+        EditModeTestHelpers.Connect(a, b);
+        int t = a.layout.stopTracks[0];
+
+        var line = new ServiceLine
+        {
+            id = 1,
+            route = new List<Station> { a, b, a },
+            tracks = new List<int> { t, b.StopTracks[0], t },
+        };
+        BuildController.BuildItinerary(new List<ServiceLine> { line },
+            out var route, out var tracks, out _);
+
+        Assert.That(route.Count, Is.EqualTo(2), "同じ番線で戻る末尾は重複として削ること");
+        Assert.That(tracks.Count, Is.EqualTo(2));
+    }
+
     [Test]
     public void TurnbackRoute_ReturnsToSameStationOnTheSpecifiedTrack()
     {
