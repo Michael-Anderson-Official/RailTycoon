@@ -28,9 +28,21 @@ public class ServiceLine
     public string TypeName => ServiceType.Names[ServiceType.Clamp(typeIdx)];
     public Color TypeColor => ServiceType.Colors[ServiceType.Clamp(typeIdx)];
 
-    public string AutoName => route.Count >= 2
-        ? TypeName + " " + route[0].stationName + "→" + route[route.Count - 1].stationName
-        : TypeName;
+    // 起点と終点が同じ(折返しで戻ってくる系統)だと「A→A」になって分かりにくいので、
+    // 折返し駅を挟んだ表記にする
+    public string AutoName
+    {
+        get
+        {
+            if (route.Count < 2) return TypeName;
+            var first = route[0];
+            var last = route[route.Count - 1];
+            if (first != last)
+                return TypeName + " " + first.stationName + "→" + last.stationName;
+            var turn = route[route.Count / 2];
+            return TypeName + " " + first.stationName + "→" + turn.stationName + "→" + first.stationName;
+        }
+    }
     public string DisplayName => string.IsNullOrEmpty(name) ? AutoName : name;
 
     // この系統に配属中の列車数

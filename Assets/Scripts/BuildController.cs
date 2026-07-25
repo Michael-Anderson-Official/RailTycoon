@@ -532,12 +532,10 @@ public class BuildController : MonoBehaviour
         if (routeSel.Count > 0)
         {
             var last = routeSel[routeSel.Count - 1];
+            // 同じ駅をもう一度経路へ入れられる(折返しで戻ってくる運用)。
+            // 番線は経路の位置ごとに選ぶので、往路と復路で別の番線を指定できる。
+            // ただし直前と同じ駅の連続だけは、区間長0になるので受け付けない
             if (last == st) return;
-            if (routeSel.Contains(st))
-            {
-                UIController.Toast("すでに経路に含まれています");
-                return;
-            }
             // 直結でなくても、線路で繋がっていれば経路に追加できる(間の駅は通過駅になる。
             // 実際の経由駅列はTrain.TryDepart側で改めて同じFindPathを呼んで求める)
             if (!TrackNetwork.Connected(last, st) && TrackNetwork.FindPath(last, st) == null)

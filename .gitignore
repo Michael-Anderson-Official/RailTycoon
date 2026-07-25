@@ -9,3 +9,8 @@ Snapshots/
 *.sln
 Assets/Resources/PerformanceTestRun*.json*
 Assets/Resources/PerformanceTestRun*
+
+# Codexレビューの生成物(ログ・テスト結果)は追跡しない。
+# 手書きのレビュー文書(.md)はコード内コメントから参照しているので残す。
+CodexReviews/*.log
+CodexReviews/*.xml

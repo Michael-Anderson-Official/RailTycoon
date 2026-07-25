@@ -39,6 +39,52 @@ public class SkipStopTests
         return (a, b, c, train);
     }
 
+    // ---- 折返し(同じ駅へ戻る系統) ----
+    // 経路に同じ駅を2回入れられ、往路と復路で別の番線を指定できること
+
+    [Test]
+    public void TurnbackRoute_ReturnsToSameStationOnTheSpecifiedTrack()
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 1400), 0, 10, 2, 2, "B");
+        EditModeTestHelpers.Connect(a, b);
+
+        int outbound = a.layout.stopTracks[0];
+        int inbound = a.layout.stopTracks[a.layout.stopTracks.Count - 1];
+        Assert.That(outbound, Is.Not.EqualTo(inbound), "この検証には2番線以上のAが必要");
+
+        var fm = TrainCatalog.Formations[0];
+        a.TryReserveSpecific(outbound);
+        var go = new GameObject("Turnback");
+        go.transform.SetParent(BuildController.WorldRoot, false);
+        var train = go.AddComponent<Train>();
+        TrackNetwork.trains.Add(train);
+        // A(往路番線) → B → A(復路番線)
+        train.Init(fm, new List<Station> { a, b, a },
+            new List<int> { outbound, b.StopTracks[0], inbound });
+
+        Assert.That(train.cyclic, Is.False, "起点と終点が同じ駅なら折返し運転になること");
+
+        float tick = Bootstrap.TickSeconds;
+        var arrivals = new List<(string station, int track)>();
+        int seen = 0;
+        for (int i = 0; i < 400000 && arrivals.Count < 2; i++)
+        {
+            train.SimTick(tick);
+            if (train.ArrivalCount > seen)
+            {
+                seen = train.ArrivalCount;
+                arrivals.Add((train.route[train.idx].stationName, train.curTrack));
+            }
+        }
+
+        Assert.That(arrivals.Count, Is.GreaterThanOrEqualTo(2), "B経由でAへ戻ってくること");
+        Assert.That(arrivals[0].station, Is.EqualTo("B"));
+        Assert.That(arrivals[1].station, Is.EqualTo("A"), "同じ駅へ戻れること");
+        Assert.That(arrivals[1].track, Is.EqualTo(inbound),
+            "復路は往路と別の、指定した番線へ入ること");
+    }
+
     [Test]
     public void PassThroughStation_NeverDwellsOrBoardsAlights()
     {
