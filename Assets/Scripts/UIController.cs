@@ -1005,7 +1005,11 @@ public class UIController : MonoBehaviour
         onboardingRt = panel.rectTransform;
         onboardingTitle = Label("Title", panel.transform, "", 27,
             new Vector2(0f, 0.60f), Vector2.one, new Vector2(16f, 0f),
-            new Vector2(-16f, -10f), TextAnchor.MiddleLeft);
+            new Vector2(-68f, -10f), TextAnchor.MiddleLeft);   // 右上の×ボタンぶん空ける
+        // 案内を閉じられるようにする。タップ領域は非退行ルールの54以上を確保する
+        Btn("Close", panel.transform, "×", 26,
+            new Vector2(1f, 1f), new Vector2(1f, 1f),
+            new Vector2(-62f, -60f), new Vector2(-8f, -6f), DismissOnboarding);
         onboardingBody = Label("Body", panel.transform, "", 20,
             new Vector2(0f, 0.28f), new Vector2(1f, 0.61f), new Vector2(16f, 0f),
             new Vector2(-16f, 0f), TextAnchor.MiddleLeft);
@@ -1028,6 +1032,8 @@ public class UIController : MonoBehaviour
             else if (Services.lines.Count == 0) stage = 3;
             else if (TrackNetwork.trains.Count == 0) stage = 4;
         }
+        // ×で閉じた段階は再表示しない。進捗が次の段階へ進めば、新しい案内は改めて出す
+        if (stage >= 0 && dismissedOnboarding.Contains(stage)) stage = -1;
         onboardingStage = stage;
         onboardingPanel.SetActive(stage >= 0);
         PositionToast(IsPortrait ? PortraitToolbarHeight : LandscapeToolbarHeight);
@@ -1049,6 +1055,17 @@ public class UIController : MonoBehaviour
         onboardingTitle.text = titles[stage];
         onboardingBody.text = bodies[stage];
         onboardingButtonLabel.text = actions[stage];
+    }
+
+    // ×で閉じた段階を覚えておく(このセッション中のみ)。次の段階へ進めばまた出る
+    readonly HashSet<int> dismissedOnboarding = new HashSet<int>();
+
+    void DismissOnboarding()
+    {
+        if (onboardingStage >= 0) dismissedOnboarding.Add(onboardingStage);
+        onboardingStage = -1;
+        onboardingPanel.SetActive(false);
+        PositionToast(IsPortrait ? PortraitToolbarHeight : LandscapeToolbarHeight);
     }
 
     void RunOnboardingAction()
