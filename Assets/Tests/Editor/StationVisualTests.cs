@@ -1,0 +1,93 @@
+using NUnit.Framework;
+using UnityEngine;
+
+// Station.Buildが生成する実景用の視覚層を検証する。
+// 番線・停止位置のテストとは分離し、必要な構成物が再構築後も一意に存在することを見る。
+public class StationVisualTests
+{
+    [SetUp]
+    public void SetUp() => TrackNetwork.Clear();
+
+    [TearDown]
+    public void TearDown()
+    {
+        EditModeTestHelpers.DestroyWorldRoot();
+        TrackNetwork.Clear();
+    }
+
+    static Station MakeStation(int cars = 10, int faces = 2, int lines = 4)
+        => EditModeTestHelpers.MakeStation(Vector3.zero, 0, cars, faces, lines, "高幡中央");
+
+    static Mesh AssertMesh(Station station, string name)
+    {
+        var child = station.transform.Find(name);
+        Assert.That(child, Is.Not.Null, name + "が生成されること");
+        var filter = child.GetComponent<MeshFilter>();
+        Assert.That(filter, Is.Not.Null);
+        Assert.That(filter.sharedMesh.vertexCount, Is.GreaterThan(0), name + "に実メッシュがあること");
+        return filter.sharedMesh;
+    }
+
+    [Test]
+    public void Build_CreatesLayeredPlatformsCanopyFurnitureAndStationHouse()
+    {
+        var station = MakeStation();
+
+        AssertMesh(station, "PlatformBase");
+        AssertMesh(station, "PlatformSurface");
+        AssertMesh(station, "PlatformEdge");
+        AssertMesh(station, "TactilePaving");
+        AssertMesh(station, "Drainage");
+        AssertMesh(station, "CanopyRoof");
+        AssertMesh(station, "Metalwork");
+        AssertMesh(station, "Lighting");
+        AssertMesh(station, "Furniture");
+        AssertMesh(station, "StationSigns");
+        AssertMesh(station, "House");
+        AssertMesh(station, "Glass");
+    }
+
+    [Test]
+    public void Build_CreatesDoubleSidedStationNameSignsAndRenameUpdatesThem()
+    {
+        var station = MakeStation(cars: 6, faces: 2, lines: 2);
+
+        int signTextCount = 0;
+        foreach (var tm in station.GetComponentsInChildren<TextMesh>())
+        {
+            if (!tm.gameObject.name.StartsWith("StationSignText_")) continue;
+            signTextCount++;
+            Assert.That(tm.text, Is.EqualTo("高幡中央"));
+        }
+        Assert.That(signTextCount, Is.EqualTo(station.faces * 2),
+            "短いホームは各面1基・両面表示の駅名標を持つこと");
+
+        station.stationName = "新高幡";
+        station.UpdateLabel();
+        foreach (var tm in station.GetComponentsInChildren<TextMesh>())
+            if (tm.gameObject.name.StartsWith("StationSignText_"))
+                Assert.That(tm.text, Is.EqualTo("新高幡"));
+    }
+
+    [Test]
+    public void Rebuild_ReplacesVisualLayerWithoutDuplicateRoots()
+    {
+        var station = MakeStation();
+        station.cars = 8;
+        station.Build();
+
+        string[] roots =
+        {
+            "PlatformBase", "PlatformSurface", "PlatformEdge", "TactilePaving",
+            "Drainage", "CanopyRoof", "Metalwork", "Lighting", "Furniture",
+            "StationSigns", "House", "Glass",
+        };
+        foreach (string root in roots)
+        {
+            int count = 0;
+            for (int i = 0; i < station.transform.childCount; i++)
+                if (station.transform.GetChild(i).name == root) count++;
+            Assert.That(count, Is.EqualTo(1), root + "が再構築後に重複しないこと");
+        }
+    }
+}

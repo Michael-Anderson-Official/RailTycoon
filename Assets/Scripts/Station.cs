@@ -20,6 +20,7 @@ public class Station : MonoBehaviour
     double spawnAcc;
     TextMesh label;
     readonly List<GameObject> platformLabels = new List<GameObject>(); // 番線選択中に各停車線へ浮かべる番号
+    readonly List<TextMesh> stationSigns = new List<TextMesh>(); // 実景用のホーム駅名標
 
     public int DevLevel => (int)dev;
     public float HalfLen => StationLayout.Length(cars) * 0.5f;
@@ -58,6 +59,7 @@ public class Station : MonoBehaviour
 
         for (int i = transform.childCount - 1; i >= 0; i--)
             DestroyImmediateSafe(transform.GetChild(i).gameObject);
+        stationSigns.Clear();
         layout = StationLayout.Compute(faces, lines);
 
         if (oldEdges != null && oldFaces == faces && oldLines == lines && oldEdges.Count == layout.edges.Count)
@@ -75,25 +77,131 @@ public class Station : MonoBehaviour
         float H = HalfLen, T = StationLayout.ThroatLen;
         RebuildTrackVisual();   // 線路・渡り線・車止め(接続状態で頭端/貫通を切替)
 
-        var plat = new RailKit.MeshData();
-        var canopy = new RailKit.MeshData();
+        // 駅の当たり判定・番線ロジックは従来のlayoutだけを使い、以下は全て視覚層として
+        // 生成する。外観の作り込みが列車停止位置やセーブ互換へ影響しないようにする。
+        var platformBase = new RailKit.MeshData();
+        var platformSurface = new RailKit.MeshData();
+        var platformEdge = new RailKit.MeshData();
+        var tactile = new RailKit.MeshData();
+        var drain = new RailKit.MeshData();
+        var canopyRoof = new RailKit.MeshData();
+        var metalwork = new RailKit.MeshData();
+        var lighting = new RailKit.MeshData();
+        var furniture = new RailKit.MeshData();
+        var signBoard = new RailKit.MeshData();
         float platLen = cars * StationLayout.CarLength;
-        foreach (var p in layout.platforms)
+        for (int pi = 0; pi < layout.platforms.Count; pi++)
         {
-            RailKit.AddBox(plat, new Vector3(p.x, 0.55f, 0), new Vector3(p.y - 1.2f, 1.1f, platLen), Quaternion.identity);
-            RailKit.AddBox(canopy, new Vector3(p.x, 4.2f, 0), new Vector3(p.y - 2f, 0.2f, platLen * 0.85f), Quaternion.identity);
-            for (float z = -platLen * 0.4f; z <= platLen * 0.4f; z += 12f)
-                RailKit.AddBox(canopy, new Vector3(p.x, 2.65f, z), new Vector3(0.25f, 3.1f, 0.25f), Quaternion.identity);
-        }
-        // 小さな駅舎を横に
-        var house = new RailKit.MeshData();
-        float houseX = layout.totalWidth * 0.5f + 6f;
-        RailKit.AddBox(house, new Vector3(houseX, 2.2f, 0), new Vector3(9f, 4.4f, 7f), Quaternion.identity);
-        RailKit.AddBox(house, new Vector3(houseX, 4.6f, 0), new Vector3(10f, 0.4f, 8f), Quaternion.identity);
+            var p = layout.platforms[pi];
+            float visualW = Mathf.Max(2.6f, p.y - 1.2f);
 
-        RailKit.MeshGO("Platform", plat.ToMesh(), MatLib.Get("Platform"), transform);
-        RailKit.MeshGO("Canopy", canopy.ToMesh(), MatLib.Get("Canopy"), transform);
+            // コンクリート躯体の上に薄い舗装層を重ね、ホーム縁だけ白い笠石を見せる。
+            RailKit.AddBox(platformBase, new Vector3(p.x, 0.52f, 0),
+                new Vector3(visualW, 1.04f, platLen), Quaternion.identity);
+            RailKit.AddBox(platformSurface, new Vector3(p.x, 1.075f, 0),
+                new Vector3(visualW - 0.16f, 0.11f, platLen - 0.35f), Quaternion.identity);
+
+            foreach (var e in layout.edges)
+            {
+                if (e.platformIndex != pi) continue;
+                float edgeX = p.x - e.side * visualW * 0.5f;
+                // 線路側から順に、白い縁石→黄色い点字ブロック→細い排水帯。
+                RailKit.AddBox(platformEdge, new Vector3(edgeX + e.side * 0.12f, 1.12f, 0),
+                    new Vector3(0.34f, 0.16f, platLen - 0.25f), Quaternion.identity);
+                RailKit.AddBox(tactile, new Vector3(edgeX + e.side * 0.72f, 1.155f, 0),
+                    new Vector3(0.48f, 0.055f, platLen - 1.0f), Quaternion.identity);
+                RailKit.AddBox(drain, new Vector3(edgeX + e.side * 1.12f, 1.145f, 0),
+                    new Vector3(0.12f, 0.045f, platLen - 1.2f), Quaternion.identity);
+            }
+
+            // 京王線の地上駅で一般的な鋼製上屋を、緩い切妻屋根+中央柱+横梁で表現。
+            float roofW = Mathf.Max(3.2f, visualW - 0.7f);
+            float coveredLen = platLen * 0.78f;
+            const float roofAngle = 7f;
+            float halfRoofW = roofW * 0.5f;
+            float rise = halfRoofW * Mathf.Tan(roofAngle * Mathf.Deg2Rad);
+            float roofY = 4.12f + rise * 0.5f;
+            RailKit.AddBox(canopyRoof, new Vector3(p.x - roofW * 0.25f, roofY, 0),
+                new Vector3(halfRoofW + 0.18f, 0.18f, coveredLen),
+                Quaternion.Euler(0, 0, roofAngle));
+            RailKit.AddBox(canopyRoof, new Vector3(p.x + roofW * 0.25f, roofY, 0),
+                new Vector3(halfRoofW + 0.18f, 0.18f, coveredLen),
+                Quaternion.Euler(0, 0, -roofAngle));
+
+            float postMin = -coveredLen * 0.5f + 3f;
+            float postMax = coveredLen * 0.5f - 3f;
+            for (float z = postMin; z <= postMax + 0.01f; z += 18f)
+            {
+                RailKit.AddBox(metalwork, new Vector3(p.x, 2.58f, z),
+                    new Vector3(0.22f, 2.95f, 0.22f), Quaternion.identity);
+                RailKit.AddBox(metalwork, new Vector3(p.x, 4.02f, z),
+                    new Vector3(roofW - 0.35f, 0.16f, 0.24f), Quaternion.identity);
+                RailKit.AddBox(lighting, new Vector3(p.x, 3.9f, z + 4.5f),
+                    new Vector3(1.25f, 0.08f, 0.34f), Quaternion.identity);
+            }
+
+            // ホーム中央のベンチ。線路側の動線を塞がないよう柱の近くへ寄せる。
+            float[] benchZ = { -platLen * 0.18f, platLen * 0.18f };
+            foreach (float z in benchZ)
+            {
+                RailKit.AddBox(furniture, new Vector3(p.x + 0.75f, 1.55f, z),
+                    new Vector3(0.62f, 0.14f, 3.2f), Quaternion.identity);
+                RailKit.AddBox(furniture, new Vector3(p.x + 1.02f, 1.92f, z),
+                    new Vector3(0.12f, 0.75f, 3.2f), Quaternion.identity);
+                RailKit.AddBox(metalwork, new Vector3(p.x + 0.75f, 1.32f, z - 1.1f),
+                    new Vector3(0.12f, 0.48f, 0.12f), Quaternion.identity);
+                RailKit.AddBox(metalwork, new Vector3(p.x + 0.75f, 1.32f, z + 1.1f),
+                    new Vector3(0.12f, 0.48f, 0.12f), Quaternion.identity);
+            }
+
+            // ホーム端の転落防止柵。長手方向の線路側は列車に開放したままにする。
+            for (int endSign = -1; endSign <= 1; endSign += 2)
+            {
+                float z = endSign * (platLen * 0.5f - 0.75f);
+                for (int railNo = 0; railNo < 2; railNo++)
+                    RailKit.AddBox(metalwork, new Vector3(p.x, 1.7f + railNo * 0.48f, z),
+                        new Vector3(visualW - 0.35f, 0.1f, 0.12f), Quaternion.identity);
+                for (int post = -1; post <= 1; post++)
+                    RailKit.AddBox(metalwork, new Vector3(p.x + post * (visualW * 0.42f), 1.78f, z),
+                        new Vector3(0.12f, 1.25f, 0.12f), Quaternion.identity);
+            }
+
+            // 長いホームは駅名標を2箇所、短いホームは中央1箇所。両面表示にする。
+            int signCount = platLen >= 160f ? 2 : 1;
+            for (int si = 0; si < signCount; si++)
+            {
+                float signZ = signCount == 1 ? 0 : (si == 0 ? -platLen * 0.23f : platLen * 0.23f);
+                RailKit.AddBox(signBoard, new Vector3(p.x, 2.95f, signZ),
+                    new Vector3(0.14f, 0.92f, 3.8f), Quaternion.identity);
+                CreateStationSignText(pi, si, -1, new Vector3(p.x - 0.08f, 2.95f, signZ));
+                CreateStationSignText(pi, si, 1, new Vector3(p.x + 0.08f, 2.95f, signZ));
+            }
+        }
+
+        // 駅舎は壁・庇・ガラス出入口・方立を分け、単なる箱に見えないようにする。
+        var house = new RailKit.MeshData();
+        var glass = new RailKit.MeshData();
+        float houseX = layout.totalWidth * 0.5f + 6.5f;
+        RailKit.AddBox(house, new Vector3(houseX, 2.35f, 0), new Vector3(10f, 4.7f, 8.5f), Quaternion.identity);
+        RailKit.AddBox(canopyRoof, new Vector3(houseX, 4.78f, 0), new Vector3(11.2f, 0.28f, 9.5f), Quaternion.identity);
+        RailKit.AddBox(canopyRoof, new Vector3(houseX + 5.25f, 3.75f, 0), new Vector3(1.8f, 0.18f, 6.4f), Quaternion.identity);
+        RailKit.AddBox(glass, new Vector3(houseX + 5.02f, 2.15f, 0), new Vector3(0.12f, 2.9f, 5.6f), Quaternion.identity);
+        for (int mullion = -2; mullion <= 2; mullion++)
+            RailKit.AddBox(metalwork, new Vector3(houseX + 5.12f, 2.15f, mullion * 1.35f),
+                new Vector3(0.1f, 3.0f, 0.1f), Quaternion.identity);
+
+        RailKit.MeshGO("PlatformBase", platformBase.ToMesh(), MatLib.Get("Platform"), transform);
+        RailKit.MeshGO("PlatformSurface", platformSurface.ToMesh(), MatLib.Get("StationHouse"), transform);
+        RailKit.MeshGO("PlatformEdge", platformEdge.ToMesh(), MatLib.Get("StationHouse"), transform);
+        RailKit.MeshGO("TactilePaving", tactile.ToMesh(), MatLib.Get("SwitchBox"), transform);
+        RailKit.MeshGO("Drainage", drain.ToMesh(), MatLib.Get("Switch"), transform);
+        RailKit.MeshGO("CanopyRoof", canopyRoof.ToMesh(), MatLib.Get("Canopy"), transform);
+        RailKit.MeshGO("Metalwork", metalwork.ToMesh(), MatLib.Get("Switch"), transform);
+        RailKit.MeshGO("Lighting", lighting.ToMesh(), MatLib.Get("StationHouse"), transform);
+        RailKit.MeshGO("Furniture", furniture.ToMesh(), MatLib.Get("Tie"), transform);
+        RailKit.MeshGO("StationSigns", signBoard.ToMesh(), MatLib.Get("Canopy"), transform);
         RailKit.MeshGO("House", house.ToMesh(), MatLib.Get("StationHouse"), transform);
+        RailKit.MeshGO("Glass", glass.ToMesh(), MatLib.Get("BuildingHigh"), transform);
 
         var col = gameObject.GetComponent<BoxCollider>();
         if (col == null) col = gameObject.AddComponent<BoxCollider>();
@@ -114,6 +222,24 @@ public class Station : MonoBehaviour
         labelGo.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
         UpdateLabel();
         // 街はCityGridがワールドグリッド上にまとめて生成する(駅の子ではない)
+    }
+
+    void CreateStationSignText(int platformIndex, int signIndex, int side, Vector3 localPosition)
+    {
+        var go = new GameObject("StationSignText_" + platformIndex + "_" + signIndex + "_" + side);
+        go.transform.SetParent(transform, false);
+        go.transform.localPosition = localPosition;
+        go.transform.localRotation = Quaternion.Euler(0, side > 0 ? 90f : -90f, 0);
+        var tm = go.AddComponent<TextMesh>();
+        tm.font = MatLib.JpFont;
+        tm.text = stationName;
+        tm.fontSize = 64;
+        tm.characterSize = 0.115f;
+        tm.anchor = TextAnchor.MiddleCenter;
+        tm.alignment = TextAlignment.Center;
+        tm.color = Color.white;
+        go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
+        stationSigns.Add(tm);
     }
 
     // 接続済みの端 [0]=sign-1, [1]=sign+1。
@@ -427,6 +553,8 @@ public class Station : MonoBehaviour
     {
         if (label != null)
             label.text = stationName + "\n待" + TotalWaiting + " Lv" + DevLevel;
+        foreach (var sign in stationSigns)
+            if (sign != null) sign.text = stationName;
     }
 
     void LateUpdate()

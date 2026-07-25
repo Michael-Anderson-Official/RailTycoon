@@ -37,6 +37,7 @@ public static class Snapshot
         Shot(outDir, "overview.png", new Vector3(150, 0, -150), 1900f, 50f, 205f);
         Shot(outDir, "station_a.png", stA.transform.position, 420f, 35f, 160f);
         Shot(outDir, "station_a_close.png", stA.transform.position, 160f, 24f, 120f);
+        Shot(outDir, "station_a_detail.png", stA.transform.position, 72f, 13f, 105f);
         Shot(outDir, "station_b.png", stB.transform.position, 300f, 30f, 230f);
         Shot(outDir, "station_c.png", stC.transform.position, 250f, 30f, 20f);
         Shot(outDir, "train_running.png", TrainPos, 140f, 18f, 150f);
