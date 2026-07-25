@@ -28,7 +28,7 @@ Unityエディタ本体: `C:\Program Files\Unity\Hub\Editor\6000.3.20f1\Editor\U
 ```
 Unity.exe -batchmode -nographics -projectPath . -runTests -testPlatform EditMode -testResults "Logs/edittest.xml" -logFile "Logs/edittest.log"
 ```
-   結果は`Logs/edittest.xml`の`<test-run ... failed="0" ...>`で確認する(現在159件PASS
+   結果は`Logs/edittest.xml`の`<test-run ... failed="0" ...>`で確認する(現在160件PASS
    +1件Ignore)。
 2. 起動経路とコード生成UIを触る変更ではPlayModeも必ず実行する(現在3件PASS):
 ```

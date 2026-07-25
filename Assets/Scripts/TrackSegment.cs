@@ -135,7 +135,7 @@ public class TrackSegment
 
     // 複線の道床が中心線から左右へ張り出す量(線間±2.3 + 道床肩)。
     // 途中駅のホームを踏むかどうかの判定に使う
-    public const float TrackOffset = 2.3f;
+    public const float TrackOffset = RailDimensions.MainTrackOffset;
     public const float BedHalfWidth = 2.5f;
     public const float HalfCorridorWidth = TrackOffset + BedHalfWidth;
 

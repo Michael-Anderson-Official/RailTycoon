@@ -28,4 +28,9 @@ public static class RailDimensions
 
     // 駅構内はホーム面との間へ保守用の細い排水隙間を残すため、駅間より道床肩を絞る。
     public const float StationBedHalfWidth = 1.34f;
+
+    // 複線の線路中心どうしの間隔の半分(=中心線から各線までの距離)。
+    // 駅のスロート収束点・駅間の左右線・渡り線が全てこの値を共有する。
+    // 個別に書くと渡り線だけ位置がずれる等の不整合が起きるため、ここを唯一の基準にする
+    public const float MainTrackOffset = 2.3f;
 }
