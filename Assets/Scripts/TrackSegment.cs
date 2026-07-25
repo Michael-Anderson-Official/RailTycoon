@@ -64,15 +64,12 @@ public class TrackSegment
         var rail = new RailKit.MeshData();
         var support = new RailKit.MeshData();
         var detail = new RailKit.MeshData();
-        var center = CenterPoints();
-        // 端点の法線は近傍点からの近似(NormalAt)ではなく、駅の発着方向そのもの
-        // (CenterPointsのエルミート曲線に渡したのと同じ接線)を使い、駅の自前スロートの
-        // 線路と隙間なく繋がるようにする
-        Vector3 tan0 = a.Axis * signA, tan1 = -(b.Axis * signB);
-        RailKit.AddTrack(bed, rail, support,
-            RailKit.OffsetWithEndTangents(center, 2.3f, tan0, tan1), bedType, detail);
-        RailKit.AddTrack(bed, rail, support,
-            RailKit.OffsetWithEndTangents(center, -2.3f, tan0, tan1), bedType, detail);
+        // 描画に使った左右の中心線をそのまま保持する。列車の走行経路(Train.BuildLeg)も
+        // これを使うため、レールと列車の通り道が原理的にズレない
+        sidePlus = SideCentre(TrackOffset);
+        sideMinus = SideCentre(-TrackOffset);
+        RailKit.AddTrack(bed, rail, support, sidePlus, bedType, detail);
+        RailKit.AddTrack(bed, rail, support, sideMinus, bedType, detail);
 
         // 渡り線は駅前(スロートのリード)に駅側で描く。segmentには描かない
         length = Vector3.Distance(EndA, EndB);
@@ -98,6 +95,43 @@ public class TrackSegment
         int n = Mathf.Max(16, Mathf.CeilToInt(d / 15f));
         return RailKit.SmoothConnectPath(p0, a.Axis * signA, p1, -(b.Axis * signB), n);
     }
+
+    // 描画に使った左右の中心線(ワールド)。Build後に有効
+    List<Vector3> sidePlus, sideMinus;
+
+    // 中心線からlateralだけ横へずらした線(=実際に敷かれるレールの中心)。
+    // 端点の法線は近傍点からの近似ではなく駅の発着方向そのものを使い、
+    // 駅の自前スロートの線路と隙間なく繋がるようにする
+    // 平滑化までここで済ませて返す。これが「敷かれたレールそのもの」であり、
+    // 描画も走行経路もこの結果をそのまま使う(受け取った側が掛け直すと、
+    // レールと列車の通り道がズレる)
+    public List<Vector3> SideCentre(float lateral)
+    {
+        Vector3 tan0 = a.Axis * signA, tan1 = -(b.Axis * signB);
+        return RailKit.Chaikin(RailKit.OffsetWithEndTangents(CenterPoints(), lateral, tan0, tan1), 2);
+    }
+
+    // 駅stの側から見て、本線側offset(±TrackOffset)に対応する描画済みの中心線を、
+    // st発の進行方向に並べて返す。走行経路はこれをそのまま使う
+    public List<Vector3> SideCentreFrom(Station st, float lateralAtStart)
+    {
+        var plus = sidePlus ?? SideCentre(TrackOffset);
+        var minus = sideMinus ?? SideCentre(-TrackOffset);
+        // lateralAtStartはst側の駅ローカルxで指定されるため、どちらの線かを
+        // 「st側の端点がその値に近いか」で選ぶ
+        float dPlus = Mathf.Abs(st.transform.InverseTransformPoint(EndNearest(plus, st)).x - lateralAtStart);
+        float dMinus = Mathf.Abs(st.transform.InverseTransformPoint(EndNearest(minus, st)).x - lateralAtStart);
+        var chosen = new List<Vector3>(dPlus <= dMinus ? plus : minus);
+        // st側が先頭に来るよう並べ替える
+        if (Vector3.Distance(chosen[0], st.transform.position) >
+            Vector3.Distance(chosen[chosen.Count - 1], st.transform.position))
+            chosen.Reverse();
+        return chosen;
+    }
+
+    static Vector3 EndNearest(List<Vector3> pts, Station st)
+        => Vector3.Distance(pts[0], st.transform.position) <=
+           Vector3.Distance(pts[pts.Count - 1], st.transform.position) ? pts[0] : pts[pts.Count - 1];
 
     // 複線の道床が中心線から左右へ張り出す量(線間±2.3 + 道床肩)。
     // 途中駅のホームを踏むかどうかの判定に使う
