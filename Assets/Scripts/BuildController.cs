@@ -116,7 +116,7 @@ public class BuildController : MonoBehaviour
         selLines.Clear();
         mode = m;
         if (UIController.I != null) UIController.I.OnModeChanged();
-        if (m == Mode.Track) UIController.Toast(TrackBedLabel(pTrackBedType) + "：つなぎたい駅を2つ、順にタップ");
+        if (m == Mode.Track) UIController.Toast(TrackBedLabel(pTrackBedType) + "：つなぎたい駅を2つ、順にタップ(繋がっている2駅を選ぶと撤去)");
         else if (m == Mode.Station) UIController.Toast("地面をタップして位置を選び、「ここに建設」で確定");
         else if (m == Mode.Train) UIController.Toast("運行系統を作るか、系統に列車を配置しましょう");
     }
@@ -376,6 +376,68 @@ public class BuildController : MonoBehaviour
             + (removedLines > 0 ? "・系統" + removedLines + "本廃止" : "") + ")");
     }
 
+    // 線路を1区間だけ撤去する。撤去後にその線路を使えなくなる列車・系統も畳む
+    // (どの駅が繋がらなくなるかは経路によるため、RemoveStationと同じく
+    // 「成立しなくなった系統は廃止し、その系統の列車は払い戻して撤去」で揃える)
+    public void RemoveSegment(TrackSegment seg)
+    {
+        if (seg == null) return;
+        var a = seg.a;
+        var b = seg.b;
+        double refund = seg.length * GameState.TrackCostPerM * 0.5;
+
+        if (seg.go != null) DestroySafe(seg.go);
+        TrackNetwork.segments.Remove(seg);
+        TrackNetwork.MarkDirty();
+
+        // 撤去後の線路網で、経路の隣り合う停車駅がまだ到達可能かを見る
+        // (通過駅を挟む系統もあるので、直結ではなくFindPathで判定する)
+        bool StillRunnable(List<Station> route)
+        {
+            for (int i = 0; i + 1 < route.Count; i++)
+                if (TrackNetwork.FindPath(route[i], route[i + 1]) == null) return false;
+            return true;
+        }
+        // 巡回運転(cyclic)の末尾→先頭についてはここで追加の手当てをしない。
+        // 経路の隣り合う停車駅が全て到達可能(=StillRunnable)なら、その経路を逆に
+        // 辿れば末尾→先頭も必ず到達可能なので、閉じる区間の直結が無くなっても
+        // TryDepartはFindPathで迂回経路を見つけて発車できる(通過駅対応済みのため)。
+        // SaveLoadのcyclic検証も直結ではなく到達可能性で見ているので通る
+        var deadLines = Services.lines.FindAll(l => !StillRunnable(l.route));
+        int removedTrains = 0;
+        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+        {
+            if (t.route == null) continue;
+            bool dead = !StillRunnable(t.route)
+                || (t.lineIds != null && t.lineIds.Exists(id => deadLines.Exists(l => l.id == id)));
+            if (!dead) continue;
+            refund += t.RefundValue;
+            removedTrains++;
+            t.ReleaseAll();
+            TrackNetwork.trains.Remove(t);
+            DestroySafe(t.gameObject);
+        }
+        foreach (var l in deadLines) Services.lines.Remove(l);
+        selLines.RemoveAll(l => !Services.lines.Contains(l));
+
+        // 組み直すのは、撤去した線路を実際に掴んでいた列車だけにする。
+        // 無関係な列車まで組み直すと走行中の位置・速度が失われてダイヤが乱れる
+        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+            if (t.HoldsSegment(seg)) t.ResyncToNetwork();
+
+        // 端が空いたので頭端(車止め)へ戻す
+        if (a != null) a.RebuildTrackVisual();
+        if (b != null) b.RebuildTrackVisual();
+
+        GameState.Refund(refund);
+        SaveLoad.Save();
+        if (UIController.I != null) UIController.I.RefreshTrainPanel();
+        UIController.Toast((a != null ? a.stationName : "?") + "〜" + (b != null ? b.stationName : "?")
+            + "の線路を撤去(払戻 " + (refund / 1e8).ToString("F1") + "億円"
+            + (removedTrains > 0 ? "・列車" + removedTrains + "本撤去" : "")
+            + (deadLines.Count > 0 ? "・系統" + deadLines.Count + "本廃止" : "") + ")");
+    }
+
     // ---- 線路 ----
 
     void TapTrackStation(Station st)
@@ -391,9 +453,13 @@ public class BuildController : MonoBehaviour
         if (trackFirst == st) { ClearTrackSel(); return; }
         var a = trackFirst;
         ClearTrackSel();
-        if (TrackNetwork.Connected(a, st))
+        // 既に繋がっている2駅を選び直した場合は、その線路の撤去とみなして確認を出す
+        // (線路単体を撤去する唯一の導線。誤って貫通線路を敷いた場合もここで消せる)
+        var existing = TrackNetwork.Find(a, st);
+        if (existing != null)
         {
-            UIController.Toast("すでに接続されています");
+            if (UIController.I != null) UIController.I.ConfirmRemoveSegment(existing);
+            else UIController.Toast("すでに接続されています");
             return;
         }
         int bestSa = 1, bestSb = 1;

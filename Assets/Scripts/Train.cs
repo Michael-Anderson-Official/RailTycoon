@@ -501,6 +501,18 @@ public class Train : MonoBehaviour
 
     public bool RouteHas(Station st) => route != null && route.Contains(st);
 
+    // 走行中の区間(最終区間・未解放の通過区間)としてsegを掴んでいるか。
+    // 線路の撤去時に、影響を受ける列車だけを組み直すために使う
+    // (無関係な列車まで組み直すと、走行中の位置・速度が失われてダイヤが乱れる)
+    public bool HoldsSegment(TrackSegment seg)
+    {
+        if (seg == null) return false;
+        if (curSeg == seg) return true;
+        for (int i = nextTransitCheckpoint; i < transitCheckpoints.Count; i++)
+            if (transitCheckpoints[i].isSegment && transitCheckpoints[i].seg == seg) return true;
+        return false;
+    }
+
     // 撤去時の払い戻し額
     public double RefundValue => fm.CostYen * 0.5;
 

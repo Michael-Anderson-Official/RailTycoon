@@ -257,6 +257,101 @@ public class RailGeometryTests
             Is.Not.Null, "既設線路の上には建てられないこと");
     }
 
+    // ---- 線路単体の撤去 ----
+    // 誤って敷いた線路(途中の駅を貫通してしまったもの等)を消せるようにするため、
+    // 線路モードで繋がっている2駅を選び直すと撤去できる
+
+    [Test]
+    public void RemoveSegment_DeletesTrackAndRebuildsStationEnds()
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 900), 0, 10, 2, 2, "B");
+        var seg = EditModeTestHelpers.Connect(a, b);
+        var go = new GameObject("BC");
+        roots.Add(go);
+        var bc = go.AddComponent<BuildController>();
+
+        Assert.That(TrackNetwork.Connected(a, b), Is.True);
+        bc.RemoveSegment(seg);
+
+        Assert.That(TrackNetwork.segments, Has.No.Member(seg), "線路が台帳から消えること");
+        Assert.That(TrackNetwork.Connected(a, b), Is.False, "撤去後は接続が切れていること");
+    }
+
+    [Test]
+    public void RemoveSegment_LeavesUnrelatedRunningTrainsUndisturbed()
+    {
+        // 別々の連結成分にする(A-Bを撤去してもC-Dの列車には何の関係も無い)
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 900), 0, 10, 2, 2, "B");
+        var seg = EditModeTestHelpers.Connect(a, b);
+        var c = EditModeTestHelpers.MakeStation(new Vector3(4000, 0, 0), 0, 10, 2, 2, "C");
+        var d = EditModeTestHelpers.MakeStation(new Vector3(4000, 0, 900), 0, 10, 2, 2, "D");
+        EditModeTestHelpers.Connect(c, d);
+
+        var fm = TrainCatalog.Formations[0];
+        int trackC;
+        c.TryReserve(out trackC);
+        var tgo = new GameObject("Train");
+        tgo.transform.SetParent(BuildController.WorldRoot, false);
+        var train = tgo.AddComponent<Train>();
+        TrackNetwork.trains.Add(train);
+        train.Init(fm, new List<Station> { c, d }, new List<int> { trackC, d.StopTracks[0] });
+        float tick = Bootstrap.TickSeconds;
+        for (int i = 0; i < 1200 && train.IsDwelling; i++) train.SimTick(tick);
+        Assert.That(train.IsDwelling, Is.False, "前提: この列車は走行中であること");
+        float sBefore = train.RouteS;
+
+        var go = new GameObject("BC");
+        roots.Add(go);
+        go.AddComponent<BuildController>().RemoveSegment(seg);
+
+        Assert.That(train.IsDwelling, Is.False, "無関係な列車が停車状態へ戻されないこと");
+        Assert.That(train.RouteS, Is.EqualTo(sBefore).Within(0.001f),
+            "無関係な列車の走行位置が動かされないこと");
+    }
+
+    // 巡回運転の「閉じる区間」を撤去しても、経路が成立している限り列車は
+    // 迂回経路(通過駅対応のFindPath)で走り続けられ、行き詰まらないこと
+    [Test]
+    public void RemoveSegment_ClosingLegOfCyclicRoute_TrainStillDeparts()
+    {
+        // A-B-C-A の三角形。route=[A,B,C]をcyclicで走らせ、閉じるC-Aを撤去する
+        var a = EditModeTestHelpers.MakeStation(new Vector3(0, 0, -900), 0, 10, 2, 2, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 900), 0, 10, 2, 2, "B");
+        var c = EditModeTestHelpers.MakeStation(new Vector3(1800, 0, 0), 90, 10, 2, 2, "C");
+        EditModeTestHelpers.Connect(a, b);
+        EditModeTestHelpers.Connect(b, c);
+        var closing = EditModeTestHelpers.Connect(c, a);
+
+        var fm = TrainCatalog.Formations[0];
+        int trackA;
+        a.TryReserve(out trackA);
+        var tgo = new GameObject("Train");
+        tgo.transform.SetParent(BuildController.WorldRoot, false);
+        var train = tgo.AddComponent<Train>();
+        TrackNetwork.trains.Add(train);
+        train.Init(fm, new List<Station> { a, b, c },
+            new List<int> { trackA, b.StopTracks[0], c.StopTracks[0] });
+        Assert.That(train.cyclic, Is.True, "前提: 末尾-先頭が繋がっているので巡回運転になる");
+
+        var go = new GameObject("BC");
+        roots.Add(go);
+        go.AddComponent<BuildController>().RemoveSegment(closing);
+
+        Assert.That(train, Is.Not.Null, "経路自体は成立しているので列車は撤去されないこと");
+        Assert.That(TrackNetwork.Connected(c, a), Is.False, "前提: 閉じる区間の直結は無くなっている");
+        Assert.That(TrackNetwork.FindPath(c, a), Is.Not.Null,
+            "末尾→先頭はB経由で到達可能なままであること(だから行き詰まらない)");
+
+        // 末尾(C)まで進めてから、迂回経路で発車できることを実際に走らせて確かめる
+        float tick = Bootstrap.TickSeconds;
+        int departsBefore = train.DepartureCount;
+        for (int i = 0; i < 400000 && train.DepartureCount < departsBefore + 3; i++) train.SimTick(tick);
+        Assert.That(train.DepartureCount, Is.GreaterThanOrEqualTo(departsBefore + 3),
+            "閉じる区間が無くても発車を繰り返せること(どこかで詰まらないこと)");
+    }
+
     [Test]
     public void StationPlacement_BesideExistingTrack_IsAllowed()
     {

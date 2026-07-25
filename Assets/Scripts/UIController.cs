@@ -1283,6 +1283,16 @@ public class UIController : MonoBehaviour
         confirmModal.SetActive(false);
     }
 
+    // 線路モードで既に繋がっている2駅を選んだときの撤去確認(BuildControllerから呼ぶ)
+    public void ConfirmRemoveSegment(TrackSegment seg)
+    {
+        if (seg == null || seg.a == null || seg.b == null) return;
+        ShowConfirm("この線路を撤去しますか？",
+            seg.a.stationName + "〜" + seg.b.stationName + "の線路を撤去します。\n" +
+            "この線路が無いと走れなくなる系統・列車も、あわせて払い戻して撤去されます。",
+            () => BC.RemoveSegment(seg));
+    }
+
     void ShowConfirm(string title, string body, Action action)
     {
         confirmTitle.text = title;
