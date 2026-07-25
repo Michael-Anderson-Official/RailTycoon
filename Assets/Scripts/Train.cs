@@ -257,6 +257,20 @@ public class Train : MonoBehaviour
     // 1回だけまとめて呼ぶ(複数tickを1フレームで消化する場合の無駄な再描画を避けるため)
     public void SimTick(float dt)
     {
+        // 速度倍率が高いほど1tickあたりのシミュレーション秒数(dt)が大きくなるが、
+        // そのまま陽的に積分すると、加減速・発車・到着の各判定がtickの粗さへ
+        // 量子化され、同じシミュレーション時刻でも×1と×20で列車位置が数十m
+        // ずれていた(×20では1tick=1/3シミュレーション秒)。
+        // 刻み幅を倍率によらず一定(=×1相当)にして、×20を「×1の刻みを20回」に
+        // 分解することで、構造的に等価にする。物理は数回の四則演算なので、
+        // 刻み数が増えても負荷は問題にならない
+        int steps = Mathf.Max(1, Mathf.CeilToInt(dt / Bootstrap.TickSeconds - 1e-4f));
+        float step = dt / steps;
+        for (int i = 0; i < steps; i++) SimStep(step);
+    }
+
+    void SimStep(float dt)
+    {
         if (state == St.Dwell)
         {
             dwellT -= dt;
