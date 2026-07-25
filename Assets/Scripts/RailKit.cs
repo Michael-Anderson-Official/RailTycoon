@@ -239,15 +239,15 @@ public static class RailKit
         return cur;
     }
 
-    public const float Gauge = 0.7175f;   // 軌間1.435mの半分
-    public const float RailTop = 0.55f;    // レール頭頂の高さ
+    public const float Gauge = RailDimensions.HalfGauge;
+    public const float RailTop = RailDimensions.RailTop;
     public const float TieSpacing = 0.95f; // 枕木の間隔(実物~0.6mを少し粗く)
 
     // 1本の線路をMeshDataに追加。バラスト軌道は砕石肩+枕木、スラブ軌道は
     // 連続コンクリート床版+レール支持台+締結装置/目地として構成する。
     // detailはスラブの締結装置・目地用。駅構内など従来のバラスト軌道ではnullでよい。
     public static void AddTrack(MeshData bed, MeshData rail, MeshData support, List<Vector3> center,
-        TrackBedType bedType = TrackBedType.Ballast, MeshData detail = null)
+        TrackBedType bedType = TrackBedType.Ballast, MeshData detail = null, float bedHalfWidth = -1f)
     {
         float total = PathLength(center);
         var cum = Cumulative(center);
@@ -255,7 +255,8 @@ public static class RailKit
         if (bedType == TrackBedType.Slab)
         {
             // PCスラブ本体。バラスト肩より直線的で低い連続床版にする。
-            AddSlab(bed, center, 2.15f, 0.28f, 0.28f);
+            float slabHalf = bedHalfWidth > 0f ? bedHalfWidth : 2.15f;
+            AddSlab(bed, center, slabHalf, 0.28f, 0.28f);
             AddSlab(support, Offset(center, Gauge), 0.24f, 0.39f, 0.12f);
             AddSlab(support, Offset(center, -Gauge), 0.24f, 0.39f, 0.12f);
 
@@ -266,7 +267,8 @@ public static class RailKit
                 {
                     Vector3 p, f;
                     Sample(center, cum, s, out p, out f);
-                    AddBox(detail, p + Vector3.up * 0.292f, new Vector3(4.22f, 0.025f, 0.09f),
+                    AddBox(detail, p + Vector3.up * 0.292f,
+                        new Vector3(slabHalf * 2f - 0.08f, 0.025f, 0.09f),
                         Quaternion.LookRotation(f, Vector3.up));
                 }
                 for (float s = 0.45f; s < total; s += 0.72f)
@@ -285,8 +287,10 @@ public static class RailKit
         else
         {
             // バラスト: 幅広の低い基部 + その上に枕木が載る一段高い天端(=肩のある台形)
-            AddSlab(bed, center, 2.5f, 0.22f, 0.22f);
-            AddSlab(bed, center, 1.95f, 0.36f, 0.16f);
+            float baseHalf = bedHalfWidth > 0f ? bedHalfWidth : 2.5f;
+            float topHalf = bedHalfWidth > 0f ? Mathf.Max(1.18f, baseHalf - 0.16f) : 1.95f;
+            AddSlab(bed, center, baseHalf, 0.22f, 0.22f);
+            AddSlab(bed, center, topHalf, 0.36f, 0.16f);
 
             // 枕木(密に敷く)。バラスト天端に半分埋まる高さ
             for (float s = 0.6f; s < total; s += TieSpacing)

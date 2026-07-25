@@ -40,6 +40,11 @@ public static class Snapshot
         Shot(outDir, "station_a_detail.png", stA.transform.position, 72f, 13f, 105f);
         Shot(outDir, "station_b.png", stB.transform.position, 300f, 30f, 230f);
         Shot(outDir, "station_c.png", stC.transform.position, 250f, 30f, 20f);
+        // 停車中の列車とホーム端を、水平隙間と床面高さが読める近景で確認する。
+        Shot(outDir, "platform_gap_side.png", stC.transform.position + Vector3.up * 1.2f,
+            72f, 9f, stC.transform.eulerAngles.y + 90f);
+        Shot(outDir, "platform_gap_top.png", stC.transform.position,
+            70f, 58f, stC.transform.eulerAngles.y + 135f);
         Shot(outDir, "train_running.png", TrainPos, 140f, 18f, 150f);
         Shot(outDir, "throat.png", stA.End(1), 150f, 28f, 190f);
         TrackBedShot(outDir, "track_ballast.png", segAB);

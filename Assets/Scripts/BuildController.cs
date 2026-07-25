@@ -40,6 +40,7 @@ public class BuildController : MonoBehaviour
     Station trackFirst;
     GameObject trackMarker;
     public TrackBedType pTrackBedType = TrackBedType.Ballast;
+    public Station TrackFirst => trackFirst;
 
     public static string TrackBedLabel(TrackBedType type)
         => type == TrackBedType.Slab ? "スラブ軌道" : "バラスト軌道";
@@ -339,6 +340,7 @@ public class BuildController : MonoBehaviour
         {
             trackFirst = st;
             trackMarker = MakeMarker(st.transform.position, 30f, new Color(1f, 0.85f, 0.2f, 0.5f));
+            if (UIController.I != null) UIController.I.RefreshTrackSelection();
             UIController.Toast(st.stationName + "を選択。接続先の駅をタップ");
             return;
         }
@@ -392,6 +394,14 @@ public class BuildController : MonoBehaviour
     {
         trackFirst = null;
         if (trackMarker != null) { Destroy(trackMarker); trackMarker = null; }
+        if (UIController.I != null) UIController.I.RefreshTrackSelection();
+    }
+
+    public void CancelTrackSelection()
+    {
+        if (trackFirst == null) return;
+        ClearTrackSel();
+        UIController.Toast("駅の選択を解除しました");
     }
 
     // ---- 列車 ----

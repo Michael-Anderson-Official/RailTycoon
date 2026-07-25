@@ -633,7 +633,8 @@ public class Train : MonoBehaviour
         fwd.Normalize();
         // 前面ガラスは車体先端より前へ張り出すので、鼻先より少し前・運転席高さに置く
         // (pfのままだと赤い前面の内側に入り画面が真っ赤になる)
-        pos = pf + fwd * 2.2f + Vector3.up * 2.9f;
+        pos = pf + fwd * 2.2f
+            + Vector3.up * (TrainVisual.BogieRootY + TrainVisual.CabEyeLocalY);
     }
 
     // 台車ごとの接線サンプル用の前後窓。狭くしすぎるとレール中心線の折れ点で
@@ -656,17 +657,20 @@ public class Train : MonoBehaviour
 
             Vector3 fPos = SampleBogie(path, cum, c + TrainVisual.BogieOffset, out Vector3 fFwd);
             Vector3 rPos = SampleBogie(path, cum, c - TrainVisual.BogieOffset, out Vector3 rFwd);
-            if (bogieF != null) bogieF.SetPositionAndRotation(fPos, Quaternion.LookRotation(fFwd, Vector3.up));
-            if (bogieR != null) bogieR.SetPositionAndRotation(rPos, Quaternion.LookRotation(rFwd, Vector3.up));
-
             var mid = (fPos + rPos) * 0.5f;
             var fwd = fPos - rPos;
             if (fwd.sqrMagnitude < 1e-6f) fwd = fFwd;
             body.SetPositionAndRotation(mid, Quaternion.LookRotation(fwd.normalized, Vector3.up));
+            // 台車はbodyの子なので、車体を動かした後にworld姿勢を確定する。逆順だと
+            // 最後のbody移動が台車へ二重に加算され、停止中でも車輪がレールからずれる。
+            if (bogieF != null)
+                bogieF.SetPositionAndRotation(fPos, Quaternion.LookRotation(fFwd, Vector3.up));
+            if (bogieR != null)
+                bogieR.SetPositionAndRotation(rPos, Quaternion.LookRotation(rFwd, Vector3.up));
         }
     }
 
-    // 弧長centerの位置(前後窓±BogieSampleWindowの中点、+0.2m持ち上げ)と接線を返す
+    // 弧長centerの位置と接線を返す。持上げ量は車輪下面がレール頭頂へ一致する実寸値。
     static Vector3 SampleBogie(List<Vector3> path, float[] cum, float center, out Vector3 fwd)
     {
         Vector3 pf, pr, f;
@@ -675,7 +679,7 @@ public class Train : MonoBehaviour
         fwd = pf - pr;
         if (fwd.sqrMagnitude < 1e-6f) fwd = f;
         fwd.Normalize();
-        return (pf + pr) * 0.5f + Vector3.up * 0.2f;
+        return (pf + pr) * 0.5f + Vector3.up * TrainVisual.BogieRootY;
     }
 
     // 収束点と本線側(左側通行)のオフセットが±0.1m以上ずれていれば、その駅端では

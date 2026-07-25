@@ -17,7 +17,10 @@ public class CameraRig : MonoBehaviour
     bool touchUi;
     float lastPinch = -1;
 
-    const float MinDist = 60f, MaxDist = 3200f, Limit = 1950f;
+    // 縦画面で約4km四方を横幅に収めるには、狭い水平FOVのため3.2km以上離れる。
+    // far clipも同じ用途に合わせ、全体表示後に端の駅が欠けない範囲を確保する。
+    const float MinDist = 60f, MaxDist = 12000f, Limit = 1950f;
+    public const float NetworkFrameFill = 0.72f;
 
     public Camera Cam => cam;
 
@@ -40,7 +43,7 @@ public class CameraRig : MonoBehaviour
         if (cam == null) cam = gameObject.AddComponent<Camera>();
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = new Color(0.68f, 0.81f, 0.93f);
-        cam.farClipPlane = 9000f;
+        cam.farClipPlane = 18000f;
         cam.nearClipPlane = 1f;
         gameObject.tag = "MainCamera";
         Apply();
@@ -158,6 +161,82 @@ public class CameraRig : MonoBehaviour
     }
 
     public void RotateStep() => yaw = Mathf.Repeat(yaw + 45f, 360f);
+
+    public void ZoomBy(float factor)
+    {
+        distance = Mathf.Clamp(distance * factor, MinDist, MaxDist);
+    }
+
+    public void FocusOn(Vector3 worldPosition, float preferredDistance = 220f)
+    {
+        target = new Vector3(worldPosition.x, 0f, worldPosition.z);
+        distance = Mathf.Clamp(preferredDistance, MinDist, MaxDist);
+    }
+
+    // 指定した地上Boundsの全隅が、縦横FOVのNetworkFrameFill内へ入る距離を返す。
+    // 各隅のcamera-space depthも含めるため、俯角やyawで手前側だけ切れることもない。
+    public static float RequiredFrameDistance(Bounds bounds, float cameraPitch, float cameraYaw,
+        float verticalFov, float aspect, float viewportFill = NetworkFrameFill)
+    {
+        aspect = Mathf.Max(0.1f, aspect);
+        viewportFill = Mathf.Clamp(viewportFill, 0.1f, 0.95f);
+        float tanV = Mathf.Tan(Mathf.Clamp(verticalFov, 10f, 150f) * 0.5f * Mathf.Deg2Rad);
+        float tanH = tanV * aspect;
+        var rotation = Quaternion.Euler(cameraPitch, cameraYaw, 0f);
+        Vector3 right = rotation * Vector3.right;
+        Vector3 up = rotation * Vector3.up;
+        Vector3 forward = rotation * Vector3.forward;
+        Vector3 ext = bounds.extents;
+        float required = 0f;
+
+        for (int ix = -1; ix <= 1; ix += 2)
+            for (int iy = -1; iy <= 1; iy += 2)
+                for (int iz = -1; iz <= 1; iz += 2)
+                {
+                    Vector3 rel = Vector3.Scale(ext, new Vector3(ix, iy, iz));
+                    float depthFromTarget = Vector3.Dot(rel, forward);
+                    float horizontal = Mathf.Abs(Vector3.Dot(rel, right));
+                    float vertical = Mathf.Abs(Vector3.Dot(rel, up));
+                    required = Mathf.Max(required,
+                        horizontal / (tanH * viewportFill) - depthFromTarget,
+                        vertical / (tanV * viewportFill) - depthFromTarget);
+                }
+        return Mathf.Max(0f, required);
+    }
+
+    // 建設済みの全駅が画面へ収まる位置へ戻す。駅が無い時は初期視点。
+    public void FrameNetwork()
+    {
+        if (TrackNetwork.stations.Count == 0)
+        {
+            target = Vector3.zero;
+            distance = 600f;
+            return;
+        }
+
+        var first = TrackNetwork.stations[0];
+        var bounds = new Bounds(first.transform.position, Vector3.zero);
+        foreach (var st in TrackNetwork.stations)
+        {
+            Vector3 along = st.Axis * (st.HalfLen + StationLayout.ThroatLen);
+            float halfWidth = st.layout.trackOffsets != null
+                ? st.layout.totalWidth * 0.5f + 8f : 18f;
+            Vector3 across = st.transform.right * halfWidth;
+            bounds.Encapsulate(st.transform.position + along + across);
+            bounds.Encapsulate(st.transform.position + along - across);
+            bounds.Encapsulate(st.transform.position - along + across);
+            bounds.Encapsulate(st.transform.position - along - across);
+        }
+        // 曲線線路のふくらみと画面端の視覚余白。
+        bounds.Expand(new Vector3(60f, 0f, 60f));
+        target = bounds.center;
+        target.y = 0f;
+        float aspect = cam != null && cam.aspect > 0.01f
+            ? cam.aspect : Mathf.Max(0.1f, (float)Screen.width / Mathf.Max(1, Screen.height));
+        float fov = cam != null ? cam.fieldOfView : 60f;
+        distance = Mathf.Clamp(Mathf.Max(180f,
+            RequiredFrameDistance(bounds, pitch, yaw, fov, aspect)), MinDist, MaxDist);
+    }
 
     void Apply()
     {

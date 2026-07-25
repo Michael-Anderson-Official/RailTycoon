@@ -82,15 +82,26 @@ public static class StationLayout
         for (int s = 0; s < slots.Length; s++)
         {
             int first = offsets.Count;
-            for (int j = 0; j < slots[s]; j++)
+            int count = slots[s];
+            if (count > 0)
             {
-                offsets.Add(x + TrackPitch * 0.5f);
-                x += TrackPitch;
+                // ホームに接する側は「車体半幅+実隙間」だけを線路中心から空ける。
+                // 外側は駅間道床が収まる余白を維持する。従来は全スロットを一律
+                // n*TrackPitchとしたため、ホーム端との間が約1.5mも空いていた。
+                float leftMargin = s > 0
+                    ? RailDimensions.TrackCenterToPlatformFace
+                    : TrackPitch * 0.5f;
+                float rightMargin = s < faces
+                    ? RailDimensions.TrackCenterToPlatformFace
+                    : TrackPitch * 0.5f;
+                for (int j = 0; j < count; j++)
+                    offsets.Add(x + leftMargin + j * TrackPitch);
+                x += leftMargin + (count - 1) * TrackPitch + rightMargin;
             }
             int last = offsets.Count - 1;
             // スロット内の線のうち、隣接ホーム側の端の線だけが停車可能。
             // first/lastが同じ(スロット内が1線)場合、その1線は両側にホーム縁を持つ
-            if (slots[s] > 0)
+            if (count > 0)
             {
                 if (s > 0)
                 {

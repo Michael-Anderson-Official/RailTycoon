@@ -43,6 +43,7 @@ public static class WebGLBuild
 
         var htmlPath = System.IO.Path.Combine(outDir, "index.html");
         var html = System.IO.File.ReadAllText(htmlPath);
+        html = html.Replace("<html lang=\"en-us\">", "<html lang=\"ja\">");
         html = System.Text.RegularExpressions.Regex.Replace(
             html, "<title>.*?</title>", "<title>レールタイクーン</title>");
         // ?v= はiOSのapple-touch-iconキャッシュ対策(アイコンを変えたら数字を上げる)
@@ -50,11 +51,27 @@ public static class WebGLBuild
             "<link rel=\"icon\" type=\"image/png\" sizes=\"32x32\" href=\"icons/icon-32.png?v=2\">\n" +
             "    <link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"icons/icon-180.png?v=2\">\n" +
             "    <link rel=\"manifest\" href=\"manifest.webmanifest?v=2\">\n" +
+            "    <meta name=\"viewport\" content=\"width=device-width,height=device-height," +
+            "initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\n" +
+            "    <meta name=\"theme-color\" content=\"#0e1420\">\n" +
             "    <meta name=\"apple-mobile-web-app-capable\" content=\"yes\">\n" +
             "    <meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\">\n" +
             "    <meta name=\"apple-mobile-web-app-title\" content=\"レールタイクーン\">\n" +
-            // touch-action:none がないとSafariがドラッグ/ピンチをページ側ジェスチャーとして横取りする
-            "    <style>#unity-canvas{touch-action:none}body{overscroll-behavior:none}</style>\n" +
+            // Unity既定テンプレートのdesktop 960x600固定も上書きし、全端末で表示面を使い切る。
+            // touch-action:none はSafariによるドラッグ/ピンチの横取りを防ぐ。
+            "    <style>\n" +
+            "      html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#0e1420;" +
+            "overscroll-behavior:none}\n" +
+            "      #unity-container{position:fixed!important;inset:0!important;width:100%!important;" +
+            "height:100%!important;transform:none!important}\n" +
+            "      #unity-canvas{display:block;width:100%!important;height:100%!important;" +
+            "touch-action:none;background:#0e1420}\n" +
+            "      #unity-footer{display:none!important}\n" +
+            "      #unity-loading-bar{top:50%!important;left:50%!important;" +
+            "transform:translate(-50%,-50%)!important}\n" +
+            "      #unity-warning{position:absolute;left:max(12px,env(safe-area-inset-left));" +
+            "right:max(12px,env(safe-area-inset-right));top:max(12px,env(safe-area-inset-top))}\n" +
+            "    </style>\n" +
             "    <link rel=\"stylesheet\"";
         html = html.Replace("<link rel=\"stylesheet\"", headExtra);
         System.IO.File.WriteAllText(htmlPath, html);

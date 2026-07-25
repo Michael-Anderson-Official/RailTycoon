@@ -11,22 +11,28 @@ public static class TrainVisual
     // 台車中心のz位置(車体ローカル、進行方向)。Train.PlaceCarsStaticが同じ値を
     // 参照して弧長サンプル位置を決めるので、変更する場合は両方を合わせること
     public const float BogieOffset = 6.2f;
+    public const float BodyHalfWidth = RailDimensions.CarBodyHalfWidth;
+    public const float FloorLocalY = RailDimensions.VehicleFloorLocalY;
+    public const float BogieRootY = RailDimensions.BogieRootY;
+    // 車体root基準の運転士目線。線路基準で固定すると車輪・車体の持上げ変更時に
+    // 前面窓だけが上へ逃げるため、CabPoseでは必ずBogieRootYと合算する。
+    public const float CabEyeLocalY = 2.9f;
 
     // 車体断面(正面図。x横/y縦、床上0.65〜屋根4.15)。反時計回り
     static readonly Vector2[] BodySection =
     {
-        new Vector2(1.42f, 0.65f),
-        new Vector2(1.45f, 1.1f),
-        new Vector2(1.45f, 3.35f),
+        new Vector2(1.37f, 0.67f),
+        new Vector2(BodyHalfWidth, FloorLocalY),
+        new Vector2(BodyHalfWidth, 3.35f),
         new Vector2(1.28f, 3.75f),
         new Vector2(0.95f, 4.08f),
         new Vector2(0.45f, 4.15f),
         new Vector2(-0.45f, 4.15f),
         new Vector2(-0.95f, 4.08f),
         new Vector2(-1.28f, 3.75f),
-        new Vector2(-1.45f, 3.35f),
-        new Vector2(-1.45f, 1.1f),
-        new Vector2(-1.42f, 0.65f),
+        new Vector2(-BodyHalfWidth, 3.35f),
+        new Vector2(-BodyHalfWidth, FloorLocalY),
+        new Vector2(-1.37f, 0.67f),
     };
 
     // 1両分の主要Transform。bogieF/bogieRはPlaceCarsStaticが弧長サンプルで
@@ -59,7 +65,7 @@ public static class TrainVisual
             RailKit.AddExtrude(body, BodySection, -HalfLen, HalfLen);
             for (int side = -1; side <= 1; side += 2)
             {
-                float px = 1.452f * side;
+                float px = (BodyHalfWidth + 0.002f) * side;
                 for (float pz = -HalfLen + 1.0f; pz <= HalfLen - 1.0f; pz += 1.5f)
                 {
                     bool nearDoor = false;
@@ -112,7 +118,7 @@ public static class TrainVisual
             var bandLo = new RailKit.MeshData();  // 窓下帯(京王ブルー/他は腰帯)
             for (int side = -1; side <= 1; side += 2)
             {
-                float x = 1.455f * side;
+                float x = (BodyHalfWidth + 0.005f) * side;
                 // 連続窓帯(柱で個別窓に見える)
                 RailKit.AddBox(glass, new Vector3(x, 3.02f, 0), new Vector3(0.06f, 0.9f, CarLen - 2.2f), Quaternion.identity);
                 // ドア4枚(凹んだ暗色面+小窓)
@@ -156,13 +162,17 @@ public static class TrainVisual
                 bogieGo.transform.localPosition = new Vector3(0, 0, bz);
                 var bogie = new RailKit.MeshData(); // メッシュ座標は台車中心(bz)基準のローカル
                 for (int side = -1; side <= 1; side += 2)
-                    RailKit.AddBox(bogie, new Vector3(1.02f * side, 0.5f, 0), new Vector3(0.16f, 0.42f, 2.9f), Quaternion.identity); // 側枠
+                    RailKit.AddBox(bogie, new Vector3(0.91f * side, 0.5f, 0), new Vector3(0.16f, 0.42f, 2.9f), Quaternion.identity); // 側枠
                 RailKit.AddBox(bogie, new Vector3(0, 0.62f, 0), new Vector3(2.1f, 0.3f, 0.7f), Quaternion.identity); // 枕梁
                 foreach (float wz in new[] { 0.95f, -0.95f })
                 {
                     RailKit.AddBox(bogie, new Vector3(0, 0.42f, wz), new Vector3(2.0f, 0.16f, 0.16f), Quaternion.identity); // 車軸
                     for (int side = -1; side <= 1; side += 2)
-                        RailKit.AddBox(bogie, new Vector3(1.02f * side, 0.42f, wz), new Vector3(0.24f, 0.86f, 0.86f), Quaternion.identity); // 車輪
+                        RailKit.AddBox(bogie,
+                            new Vector3((RailKit.Gauge + 0.07f) * side,
+                                RailDimensions.WheelLocalCenterY, wz),
+                            new Vector3(0.24f, RailDimensions.WheelRadius * 2f,
+                                RailDimensions.WheelRadius * 2f), Quaternion.identity); // 車輪
                 }
                 RailKit.MeshGO("BogieMesh", bogie.ToMesh(), underMat, bogieGo.transform);
                 if (bz > 0) bogieF = bogieGo.transform; else bogieR = bogieGo.transform;

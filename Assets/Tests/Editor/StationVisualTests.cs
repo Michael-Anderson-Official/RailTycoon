@@ -37,6 +37,7 @@ public class StationVisualTests
         AssertMesh(station, "PlatformSurface");
         AssertMesh(station, "PlatformEdge");
         AssertMesh(station, "TactilePaving");
+        AssertMesh(station, "WarningLine");
         AssertMesh(station, "Drainage");
         AssertMesh(station, "CanopyRoof");
         AssertMesh(station, "Metalwork");
@@ -73,12 +74,19 @@ public class StationVisualTests
     public void Rebuild_ReplacesVisualLayerWithoutDuplicateRoots()
     {
         var station = MakeStation();
+        var firstWarningMaterial = station.transform.Find("WarningLine")
+            .GetComponent<MeshRenderer>().sharedMaterial;
         station.cars = 8;
         station.Build();
+        var rebuiltWarningMaterial = station.transform.Find("WarningLine")
+            .GetComponent<MeshRenderer>().sharedMaterial;
+
+        Assert.That(rebuiltWarningMaterial, Is.SameAs(firstWarningMaterial),
+            "駅プレビュー再構築のたびに警戒線Materialを増やさないこと");
 
         string[] roots =
         {
-            "PlatformBase", "PlatformSurface", "PlatformEdge", "TactilePaving",
+            "PlatformBase", "PlatformSurface", "PlatformEdge", "TactilePaving", "WarningLine",
             "Drainage", "CanopyRoof", "Metalwork", "Lighting", "Furniture",
             "StationSigns", "House", "Glass",
         };

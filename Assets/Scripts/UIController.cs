@@ -1,73 +1,106 @@
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.UI;
 
-// uGUIを全てコードで組む。モードごとのパネル表示切替とHUD更新
+// uGUIを全てコードで組む。セーフエリアと縦横画面へ追従し、モードごとの操作を
+// 「選ぶ→地図で指定→確定」の順に見せる。prefabを持たない方針は維持する。
 public class UIController : MonoBehaviour
 {
     public static UIController I;
     public CameraRig rig;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
-    // WebGLはブラウザのwindow.promptで駅名入力(iOS Safariでも確実にキーボードが出る)
     [DllImport("__Internal")] static extern string RailPromptName(string def);
 #endif
 
-    Text moneyText, clockText, carriedText, toastText, costText, routeText, infoText, fmInfoText;
-    Text carsVal, facesVal, linesVal, stationTitle, confirmBtnLabel;
+    Text moneyText, clockText, carriedText, toastText, costText, routeText, infoText;
+    Text carsVal, facesVal, linesVal, stationTitle, confirmBtnLabel, trackHintText, pauseLabel;
+    Text onboardingTitle, onboardingBody, onboardingButtonLabel;
     Station infoStation;
-    float removeArmedUntil;
-    GameObject trackPanel, stationPanel, trainPanel, infoPanel, toastBg, platformRow, renameModal, edgePanel;
-    RectTransform edgeRows;
-    InputField renameInput;
-    // 列車パネル(タブ制): 系統をつくる / 列車を配置
-    GameObject serviceTab, dispatchView, lineListView, createView;
-    RectTransform lineListRows, dispatchLineRows, itineraryRows;
-    InputField stationSearchInput;
-    RectTransform stationSearchRows;
-    Image tabServiceBtn, tabDispatchBtn;
-    Image[] typeBtns;
-    readonly Dictionary<BuildController.Mode, Image> modeBtns = new Dictionary<BuildController.Mode, Image>();
-    readonly Dictionary<TrackBedType, Image> trackBedBtns = new Dictionary<TrackBedType, Image>();
-    readonly List<KeyValuePair<TrainCatalog.Formation, Image>> fmBtns = new List<KeyValuePair<TrainCatalog.Formation, Image>>();
-    readonly List<KeyValuePair<float, Image>> speedBtns = new List<KeyValuePair<float, Image>>();
-    float toastUntil;
 
-    static readonly Color PanelBg = new Color(0.10f, 0.12f, 0.18f, 0.82f);
-    static readonly Color BtnBg = new Color(0.22f, 0.26f, 0.36f, 0.95f);
-    static readonly Color BtnActive = new Color(0.95f, 0.60f, 0.15f, 0.95f);
-    static readonly Color TxtCol = new Color(0.94f, 0.95f, 0.97f);
+    RectTransform safeRoot, topBarRt, toolbarRt, trackPanelRt, stationPanelRt, trainPanelRt;
+    RectTransform infoPanelRt, toastRt, cameraToolsRt, onboardingRt, edgeBoxRt;
+    GameObject trackPanel, stationPanel, trainPanel, infoPanel, toastBg, cameraTools, onboardingPanel;
+    GameObject renameModal, edgePanel, settingsPanel, confirmModal;
+    InputField renameInput, stationSearchInput;
+    RectTransform trainContent, stationSearchRows, platformRow, edgeRows;
+    ScrollRect trainScroll;
+    Text confirmTitle, confirmBody;
+    Action pendingConfirm;
+
+    Image cabBtn, pauseBtn, stationConfirmImage, saveLineImage, dispatchImage;
+    Button stationConfirmButton;
+    readonly Dictionary<BuildController.Mode, Image> modeBtns =
+        new Dictionary<BuildController.Mode, Image>();
+    readonly Dictionary<TrackBedType, Image> trackBedBtns =
+        new Dictionary<TrackBedType, Image>();
+    readonly List<KeyValuePair<float, Image>> speedBtns =
+        new List<KeyValuePair<float, Image>>();
+    readonly List<Image> stationPresetBtns = new List<Image>();
+
+    float toastUntil, nextSlowRefresh;
+    Vector2Int lastScreenSize = new Vector2Int(-1, -1);
+    Rect lastSafeArea;
+    BuildController.TrainSub lastTrainSub = (BuildController.TrainSub)(-1);
+    int onboardingStage = -1;
+    int cabIdx;
+
+    public const float PortraitTopHeight = 154f;
+    public const float LandscapeTopHeight = 104f;
+    public const float PortraitToolbarHeight = 112f;
+    public const float LandscapeToolbarHeight = 96f;
+    public const float MinimumPrimaryButtonHeight = 54f;
+
+    static readonly Color PanelBg = new Color(0.055f, 0.075f, 0.12f, 0.94f);
+    static readonly Color PanelSoft = new Color(0.10f, 0.13f, 0.20f, 0.96f);
+    static readonly Color BtnBg = new Color(0.16f, 0.21f, 0.31f, 1f);
+    static readonly Color BtnActive = new Color(0.84f, 0.0f, 0.39f, 1f); // 京王レッド
+    static readonly Color BtnSelected = new Color(0.96f, 0.52f, 0.08f, 1f);
+    static readonly Color BtnBlue = new Color(0.08f, 0.39f, 0.67f, 1f);
+    static readonly Color Danger = new Color(0.64f, 0.12f, 0.18f, 1f);
+    static readonly Color TxtCol = new Color(0.96f, 0.97f, 0.99f);
+    static readonly Color MutedTxt = new Color(0.70f, 0.75f, 0.82f);
 
     BuildController BC => BuildController.Instance;
+    bool IsPortrait => Screen.height > Screen.width * 1.08f;
 
     public void Build()
     {
         I = this;
-        var canvasGo = gameObject;
-        var canvas = canvasGo.AddComponent<Canvas>();
+        var canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-        var scaler = canvasGo.AddComponent<CanvasScaler>();
+        var scaler = gameObject.AddComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1000, 1600);
+        scaler.referenceResolution = new Vector2(1000f, 1600f);
         scaler.matchWidthOrHeight = 0.5f;
-        canvasGo.AddComponent<GraphicRaycaster>();
+        gameObject.AddComponent<GraphicRaycaster>();
 
+        safeRoot = Rect("SafeArea", transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
         BuildTopBar();
         BuildToolbar();
         BuildTrackPanel();
         BuildStationPanel();
         BuildTrainPanel();
         BuildInfoPanel();
+        BuildCameraTools();
+        BuildOnboarding();
         BuildRenameModal();
         BuildEdgeModal();
+        BuildSettingsModal();
+        BuildConfirmModal();
         BuildToast();
+
+        ApplyResponsiveLayout();
         OnModeChanged();
+        RefreshOnboarding();
     }
 
-    // ---- パーツ生成ヘルパー ----
+    // ---- 基本パーツ ----
 
-    RectTransform Rect(string name, Transform parent, Vector2 amin, Vector2 amax, Vector2 omin, Vector2 omax)
+    RectTransform Rect(string name, Transform parent, Vector2 amin, Vector2 amax,
+        Vector2 omin, Vector2 omax)
     {
         var go = new GameObject(name, typeof(RectTransform));
         var rt = go.GetComponent<RectTransform>();
@@ -79,500 +112,1000 @@ public class UIController : MonoBehaviour
         return rt;
     }
 
-    Image Panel(string name, Transform parent, Vector2 amin, Vector2 amax, Vector2 omin, Vector2 omax, Color c)
+    Image Panel(string name, Transform parent, Vector2 amin, Vector2 amax,
+        Vector2 omin, Vector2 omax, Color color)
     {
         var rt = Rect(name, parent, amin, amax, omin, omax);
-        var img = rt.gameObject.AddComponent<Image>();
-        img.color = c;
-        return img;
+        var image = rt.gameObject.AddComponent<Image>();
+        image.color = color;
+        return image;
     }
 
-    Text Label(string name, Transform parent, string txt, int size, Vector2 amin, Vector2 amax, Vector2 omin, Vector2 omax, TextAnchor align)
+    Text Label(string name, Transform parent, string value, int size,
+        Vector2 amin, Vector2 amax, Vector2 omin, Vector2 omax, TextAnchor align)
     {
         var rt = Rect(name, parent, amin, amax, omin, omax);
-        var t = rt.gameObject.AddComponent<Text>();
-        t.font = MatLib.JpFont;
-        t.fontSize = size;
-        t.text = txt;
-        t.alignment = align;
-        t.color = TxtCol;
-        t.horizontalOverflow = HorizontalWrapMode.Overflow;
-        t.verticalOverflow = VerticalWrapMode.Overflow;
-        return t;
+        var text = rt.gameObject.AddComponent<Text>();
+        text.font = MatLib.JpFont;
+        text.fontSize = size;
+        text.text = value;
+        text.alignment = align;
+        text.color = TxtCol;
+        text.horizontalOverflow = HorizontalWrapMode.Wrap;
+        text.verticalOverflow = VerticalWrapMode.Truncate;
+        text.resizeTextForBestFit = true;
+        text.resizeTextMinSize = Mathf.Max(13, size - 8);
+        text.resizeTextMaxSize = size;
+        return text;
     }
 
-    Image Btn(string name, Transform parent, string txt, int size, Vector2 amin, Vector2 amax, Vector2 omin, Vector2 omax, UnityEngine.Events.UnityAction onClick, Color? bg = null)
+    Image Btn(string name, Transform parent, string value, int size,
+        Vector2 amin, Vector2 amax, Vector2 omin, Vector2 omax,
+        UnityEngine.Events.UnityAction onClick, Color? bg = null)
     {
-        var img = Panel(name, parent, amin, amax, omin, omax, bg ?? BtnBg);
-        var b = img.gameObject.AddComponent<Button>();
-        b.targetGraphic = img;
-        b.onClick.AddListener(onClick);
-        Label("t", img.transform, txt, size, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, TextAnchor.MiddleCenter);
-        return img;
+        var image = Panel(name, parent, amin, amax, omin, omax, bg ?? BtnBg);
+        var button = image.gameObject.AddComponent<Button>();
+        button.targetGraphic = image;
+        button.onClick.AddListener(onClick);
+        var colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(1f, 1f, 1f, 0.88f);
+        colors.pressedColor = new Color(0.68f, 0.68f, 0.68f, 1f);
+        colors.selectedColor = Color.white;
+        colors.disabledColor = new Color(0.42f, 0.42f, 0.42f, 0.72f);
+        colors.fadeDuration = 0.06f;
+        button.colors = colors;
+        Label("Text", image.transform, value, size, Vector2.zero, Vector2.one,
+            new Vector2(7f, 3f), new Vector2(-7f, -3f), TextAnchor.MiddleCenter);
+        return image;
     }
 
-    // ---- 各部 ----
+    static void SetButtonEnabled(Image image, bool enabled)
+    {
+        if (image == null) return;
+        var button = image.GetComponent<Button>();
+        if (button != null) button.interactable = enabled;
+    }
+
+    RectTransform FlowColumn(string name, Transform parent, int padding = 0, float spacing = 10f)
+    {
+        var rt = Rect(name, parent, new Vector2(0f, 1f), Vector2.one, Vector2.zero, Vector2.zero);
+        rt.pivot = new Vector2(0.5f, 1f);
+        var layout = rt.gameObject.AddComponent<VerticalLayoutGroup>();
+        layout.padding = new RectOffset(padding, padding, padding, padding);
+        layout.spacing = spacing;
+        layout.childAlignment = TextAnchor.UpperCenter;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = true;
+        layout.childForceExpandHeight = false;
+        var fitter = rt.gameObject.AddComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        return rt;
+    }
+
+    RectTransform FlowRow(string name, Transform parent, float height, float spacing = 8f)
+    {
+        var rt = Rect(name, parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+        var le = rt.gameObject.AddComponent<LayoutElement>();
+        le.minHeight = height;
+        le.preferredHeight = height;
+        var layout = rt.gameObject.AddComponent<HorizontalLayoutGroup>();
+        layout.spacing = spacing;
+        layout.childControlWidth = true;
+        layout.childControlHeight = true;
+        layout.childForceExpandWidth = false;
+        layout.childForceExpandHeight = true;
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        return rt;
+    }
+
+    Text FlowLabel(string name, Transform parent, string value, int size, float height,
+        TextAnchor align = TextAnchor.MiddleLeft, Color? color = null)
+    {
+        var text = Label(name, parent, value, size, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero, align);
+        if (color.HasValue) text.color = color.Value;
+        var le = text.gameObject.AddComponent<LayoutElement>();
+        le.minHeight = height;
+        le.preferredHeight = height;
+        le.flexibleWidth = 1f;
+        return text;
+    }
+
+    Image FlowButton(string name, Transform parent, string value, int size, float height,
+        UnityEngine.Events.UnityAction onClick, Color? color = null, float width = -1f,
+        float flexibleWidth = 1f)
+    {
+        var image = Btn(name, parent, value, size, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero, onClick, color);
+        var le = image.gameObject.AddComponent<LayoutElement>();
+        le.minHeight = height;
+        le.preferredHeight = height;
+        if (width > 0f)
+        {
+            le.minWidth = width;
+            le.preferredWidth = width;
+        }
+        le.flexibleWidth = flexibleWidth;
+        return image;
+    }
+
+    RectTransform ScrollColumn(string name, Transform parent, Vector2 omin, Vector2 omax,
+        out ScrollRect scroll)
+    {
+        var root = Rect(name, parent, Vector2.zero, Vector2.one, omin, omax);
+        scroll = root.gameObject.AddComponent<ScrollRect>();
+        scroll.horizontal = false;
+        scroll.vertical = true;
+        scroll.movementType = ScrollRect.MovementType.Clamped;
+        scroll.scrollSensitivity = 44f;
+
+        var viewport = Rect("Viewport", root, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
+        viewport.gameObject.AddComponent<RectMask2D>();
+        var content = FlowColumn("Content", viewport, 14, 10f);
+        scroll.viewport = viewport;
+        scroll.content = content;
+        return content;
+    }
+
+    // ---- HUD / ナビゲーション ----
 
     void BuildTopBar()
     {
-        var bar = Panel("TopBar", transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(6, -104), new Vector2(-6, -6), PanelBg);
-        moneyText = Label("Money", bar.transform, "", 30, new Vector2(0, 0.5f), new Vector2(0.55f, 1), new Vector2(14, 0), Vector2.zero, TextAnchor.MiddleLeft);
-        clockText = Label("Clock", bar.transform, "", 26, new Vector2(0.55f, 0.5f), new Vector2(1, 1), Vector2.zero, new Vector2(-12, 0), TextAnchor.MiddleRight);
-        carriedText = Label("Carried", bar.transform, "", 24, new Vector2(0, 0), new Vector2(0.45f, 0.5f), new Vector2(14, 0), Vector2.zero, TextAnchor.MiddleLeft);
-        float[] speeds = { 1, 5, 20 };
-        for (int i = 0; i < 3; i++)
+        var bar = Panel("TopBar", safeRoot, new Vector2(0f, 1f), Vector2.one,
+            new Vector2(6f, -PortraitTopHeight), new Vector2(-6f, -6f), PanelBg);
+        topBarRt = bar.rectTransform;
+        moneyText = Label("Money", bar.transform, "", 30, new Vector2(0f, 0.50f),
+            new Vector2(0.58f, 1f), new Vector2(14f, 0f), Vector2.zero, TextAnchor.MiddleLeft);
+        clockText = Label("Clock", bar.transform, "", 26, new Vector2(0.58f, 0.50f),
+            Vector2.one, Vector2.zero, new Vector2(-14f, 0f), TextAnchor.MiddleRight);
+        carriedText = Label("Carried", bar.transform, "", 22, Vector2.zero,
+            new Vector2(0.33f, 0.49f), new Vector2(14f, 0f), Vector2.zero, TextAnchor.MiddleLeft);
+
+        pauseBtn = Btn("Pause", bar.transform, "停止", 21, new Vector2(0.34f, 0.06f),
+            new Vector2(0.46f, 0.45f), Vector2.zero, Vector2.zero, TogglePause);
+        pauseLabel = pauseBtn.GetComponentInChildren<Text>();
+
+        float[] speeds = { 1f, 5f, 20f };
+        for (int i = 0; i < speeds.Length; i++)
         {
-            float sp = speeds[i];
-            var b = Btn("Sp" + sp, bar.transform, "×" + sp, 24,
-                new Vector2(0.40f + 0.12f * i, 0.06f), new Vector2(0.51f + 0.12f * i, 0.48f),
-                Vector2.zero, Vector2.zero, () => SetSpeed(sp));
-            speedBtns.Add(new KeyValuePair<float, Image>(sp, b));
+            float speed = speeds[i];
+            var image = Btn("Speed" + speed, bar.transform, "×" + speed, 21,
+                new Vector2(0.47f + i * 0.115f, 0.06f),
+                new Vector2(0.575f + i * 0.115f, 0.45f),
+                Vector2.zero, Vector2.zero, () => SetSpeed(speed));
+            speedBtns.Add(new KeyValuePair<float, Image>(speed, image));
         }
-        Btn("Rot", bar.transform, "視点⟳", 24, new Vector2(0.765f, 0.06f), new Vector2(0.875f, 0.48f),
-            Vector2.zero, Vector2.zero, () => { if (rig != null) rig.RotateStep(); });
-        Btn("Reset", bar.transform, "初期化", 22, new Vector2(0.885f, 0.06f), new Vector2(0.995f, 0.48f),
-            Vector2.zero, Vector2.zero, OnResetTap, new Color(0.45f, 0.2f, 0.22f, 0.95f));
+        Btn("Settings", bar.transform, "設定", 21, new Vector2(0.825f, 0.06f),
+            new Vector2(0.99f, 0.45f), Vector2.zero, Vector2.zero,
+            () => settingsPanel.SetActive(true));
         SetSpeed(GameState.timeScale);
     }
 
-    float resetArmedUntil;
-
-    void OnResetTap()
+    void TogglePause()
     {
-        if (Time.unscaledTime < resetArmedUntil)
-        {
-            SaveLoad.ResetAll();
-            return;
-        }
-        resetArmedUntil = Time.unscaledTime + 3.5f;
-        Toast("全データを消して最初から始めますか?実行するならもう一度「初期化」をタップ");
+        GameState.paused = !GameState.paused;
+        RefreshSpeedButtons();
     }
 
-    void SetSpeed(float s)
+    void SetSpeed(float speed)
     {
-        GameState.timeScale = s;
-        foreach (var kv in speedBtns) kv.Value.color = Mathf.Approximately(kv.Key, s) ? BtnActive : BtnBg;
+        GameState.timeScale = speed;
+        GameState.paused = false;
+        RefreshSpeedButtons();
+    }
+
+    void RefreshSpeedButtons()
+    {
+        if (pauseBtn != null)
+        {
+            pauseBtn.color = GameState.paused ? BtnSelected : BtnBg;
+            pauseLabel.text = GameState.paused ? "再開" : "停止";
+        }
+        foreach (var kv in speedBtns)
+            kv.Value.color = !GameState.paused && Mathf.Approximately(kv.Key, GameState.timeScale)
+                ? BtnActive : BtnBg;
     }
 
     void BuildToolbar()
     {
-        var bar = Panel("Toolbar", transform, Vector2.zero, new Vector2(1, 0), new Vector2(6, 6), new Vector2(-6, 96), PanelBg);
-        var modes = new[] { BuildController.Mode.View, BuildController.Mode.Track, BuildController.Mode.Station, BuildController.Mode.Train };
-        var names = new[] { "見る", "線路", "駅", "列車" };
-        for (int i = 0; i < 4; i++)
+        var bar = Panel("Toolbar", safeRoot, Vector2.zero, new Vector2(1f, 0f),
+            new Vector2(6f, 6f), new Vector2(-6f, PortraitToolbarHeight), PanelBg);
+        toolbarRt = bar.rectTransform;
+        var modes = new[]
         {
-            var m = modes[i];
-            var img = Btn("M" + names[i], bar.transform, names[i], 30,
-                new Vector2(i * 0.2f + 0.005f, 0.08f), new Vector2((i + 1) * 0.2f - 0.005f, 0.92f),
-                Vector2.zero, Vector2.zero, () => BC.SetMode(m));
-            modeBtns[m] = img;
+            BuildController.Mode.View, BuildController.Mode.Track,
+            BuildController.Mode.Station, BuildController.Mode.Train,
+        };
+        var names = new[] { "運行", "線路", "駅", "系統" };
+        for (int i = 0; i < modes.Length; i++)
+        {
+            var mode = modes[i];
+            var image = Btn("Mode" + mode, bar.transform, names[i], 27,
+                new Vector2(i * 0.2f + 0.005f, 0.08f),
+                new Vector2((i + 1) * 0.2f - 0.005f, 0.92f),
+                Vector2.zero, Vector2.zero, () => BC.SetMode(mode));
+            modeBtns[mode] = image;
         }
-        cabBtn = Btn("MCab", bar.transform, "展望", 30,
-            new Vector2(0.805f, 0.08f), new Vector2(0.995f, 0.92f),
-            Vector2.zero, Vector2.zero, OnCabTap);
+        cabBtn = Btn("Cab", bar.transform, "車窓", 27, new Vector2(0.805f, 0.08f),
+            new Vector2(0.995f, 0.92f), Vector2.zero, Vector2.zero, OnCabTap);
     }
-
-    Image cabBtn;
-    int cabIdx;
 
     void OnCabTap()
     {
-        var trains = Object.FindObjectsByType<Train>(FindObjectsSortMode.None);
+        var trains = FindObjectsByType<Train>(FindObjectsSortMode.None);
         if (trains.Length == 0)
         {
-            Toast("列車がいません。先に「列車」モードで走らせてください");
+            Toast("まだ列車がありません。「系統」で運行系統と列車を配置してください");
             return;
         }
-        cabIdx = rig.cabTrain == null ? 0 : (cabIdx + 1) % trains.Length;
-        rig.EnterCab(trains[cabIdx]);
+        cabIdx = rig != null && rig.cabTrain != null ? (cabIdx + 1) % trains.Length : 0;
+        if (rig != null) rig.EnterCab(trains[cabIdx]);
         cabBtn.color = BtnActive;
-        Toast("前面展望: " + trains[cabIdx].fm.Label +
-            (trains.Length > 1 ? "(もう一度タップで次の列車、" : "(") + "「見る」で戻る)");
+        RefreshOnboarding();
+        Toast("車窓: " + trains[cabIdx].fm.Label +
+            (trains.Length > 1 ? "（もう一度で次の列車）" : "") + "／「運行」で戻る");
     }
+
+    // ---- 線路 ----
 
     void BuildTrackPanel()
     {
-        var p = Panel("TrackPanel", transform, new Vector2(0, 0.5f), new Vector2(0, 0.5f),
+        var panel = Panel("TrackPanel", safeRoot, Vector2.zero, Vector2.zero,
             Vector2.zero, Vector2.zero, PanelBg);
-        var rt = p.rectTransform;
-        rt.pivot = new Vector2(0, 0.5f);
-        rt.anchoredPosition = new Vector2(8, 40);
-        rt.sizeDelta = new Vector2(330, 250);
-        trackPanel = p.gameObject;
+        trackPanel = panel.gameObject;
+        trackPanelRt = panel.rectTransform;
+        Label("Title", panel.transform, "線路を敷く", 31, new Vector2(0f, 1f),
+            new Vector2(0.72f, 1f), new Vector2(16f, -62f), new Vector2(0f, -10f),
+            TextAnchor.MiddleLeft);
+        Btn("Close", panel.transform, "閉じる", 21, new Vector2(0.74f, 1f), Vector2.one,
+            new Vector2(0f, -60f), new Vector2(-12f, -10f), () => BC.SetMode(BuildController.Mode.View));
 
-        Label("Title", p.transform, "線路構造", 30, new Vector2(0, 1), new Vector2(1, 1),
-            new Vector2(14, -58), new Vector2(-14, -14), TextAnchor.MiddleLeft);
-
-        var ballast = Btn("Ballast", p.transform, "バラスト軌道", 25,
-            new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -120), new Vector2(-14, -66),
+        trackHintText = Label("Step", panel.transform, "", 23, new Vector2(0f, 1f),
+            new Vector2(1f, 1f), new Vector2(16f, -120f), new Vector2(-16f, -68f),
+            TextAnchor.MiddleLeft);
+        var ballast = Btn("Ballast", panel.transform, "バラスト\n低コスト", 23,
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(16f, -196f), new Vector2(-5f, -130f),
             () => BC.SetTrackBedType(TrackBedType.Ballast));
-        var slab = Btn("Slab", p.transform, "スラブ軌道", 25,
-            new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -182), new Vector2(-14, -128),
+        var slab = Btn("Slab", panel.transform, "スラブ\n高耐久", 23,
+            new Vector2(0.5f, 1f), Vector2.one,
+            new Vector2(5f, -196f), new Vector2(-16f, -130f),
             () => BC.SetTrackBedType(TrackBedType.Slab));
         trackBedBtns[TrackBedType.Ballast] = ballast;
         trackBedBtns[TrackBedType.Slab] = slab;
-
-        Label("Hint", p.transform, "種類を選び、駅を2つ順にタップ", 20,
-            new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, -232), new Vector2(-14, -194),
-            TextAnchor.MiddleLeft);
+        Btn("ClearSelection", panel.transform, "駅の選択を解除", 22,
+            new Vector2(0f, 1f), new Vector2(0.52f, 1f),
+            new Vector2(16f, -262f), new Vector2(-5f, -208f),
+            () => BC.CancelTrackSelection());
+        Label("Help", panel.transform, "地図はドラッグで移動、ピンチ／±で拡大縮小できます", 19,
+            new Vector2(0.52f, 1f), Vector2.one,
+            new Vector2(7f, -262f), new Vector2(-16f, -208f), TextAnchor.MiddleLeft).color = MutedTxt;
     }
 
     public void RefreshTrackBedButtons()
     {
         if (BC == null) return;
         foreach (var kv in trackBedBtns)
-            kv.Value.color = kv.Key == BC.pTrackBedType ? BtnActive : BtnBg;
+            kv.Value.color = kv.Key == BC.pTrackBedType ? BtnSelected : BtnBg;
     }
+
+    public void RefreshTrackSelection()
+    {
+        if (trackHintText == null || BC == null) return;
+        if (TrackNetwork.stations.Count < 2)
+            trackHintText.text = "先に駅を2つ建ててください";
+        else if (BC.TrackFirst == null)
+            trackHintText.text = "1 / 2　始点の駅を地図でタップ";
+        else
+            trackHintText.text = "2 / 2　" + BC.TrackFirst.stationName + " → 接続先をタップ";
+    }
+
+    // ---- 駅 ----
 
     void BuildStationPanel()
     {
-        var p = Panel("StationPanel", transform, new Vector2(0, 0.5f), new Vector2(0, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
-        var rt = p.rectTransform;
-        rt.pivot = new Vector2(0, 0.5f);
-        rt.anchoredPosition = new Vector2(8, 40);
-        rt.sizeDelta = new Vector2(330, 740);
-        stationPanel = p.gameObject;
-        float y = -14;
-        stationTitle = Label("Title", p.transform, "駅を建設", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 44), new Vector2(-14, y), TextAnchor.MiddleLeft);
-        y -= 56;
-        // M2-D: 面・線プリセット(3列×2行のボタン)。タップで一括してpFaces/pLinesを設定する
-        Label("PresetLabel", p.transform, "プリセット", 20, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 28), new Vector2(-14, y), TextAnchor.MiddleLeft);
-        y -= 30;
-        int cols = 3;
-        float cellW = (330f - 28f) / cols;
-        float cellH = 48f;
+        var panel = Panel("StationPanel", safeRoot, Vector2.zero, Vector2.zero,
+            Vector2.zero, Vector2.zero, PanelBg);
+        stationPanel = panel.gameObject;
+        stationPanelRt = panel.rectTransform;
+        float y = -10f;
+        stationTitle = Label("Title", panel.transform, "駅を建てる", 31,
+            new Vector2(0f, 1f), new Vector2(0.72f, 1f),
+            new Vector2(16f, y - 52f), new Vector2(0f, y), TextAnchor.MiddleLeft);
+        Btn("Close", panel.transform, "閉じる", 21, new Vector2(0.74f, 1f), Vector2.one,
+            new Vector2(0f, y - 50f), new Vector2(-12f, y), () => BC.SetMode(BuildController.Mode.View));
+        y -= 58f;
+        var mapHint = Label("MapHint", panel.transform, "1　地図をタップして建設位置を決める", 22,
+            new Vector2(0f, 1f), Vector2.one, new Vector2(16f, y - 40f),
+            new Vector2(-16f, y), TextAnchor.MiddleLeft);
+        mapHint.color = MutedTxt;
+        y -= 48f;
+        Label("PresetLabel", panel.transform, "2　ホーム構成", 22,
+            new Vector2(0f, 1f), Vector2.one, new Vector2(16f, y - 32f),
+            new Vector2(-16f, y), TextAnchor.MiddleLeft);
+        y -= 38f;
+
+        const int cols = 3;
+        const float cellH = 52f;
         for (int i = 0; i < BuildController.StationPresets.Length; i++)
         {
-            int idx = i; // クロージャ用にローカルへ複写
-            int col = i % cols, row = i / cols;
-            float x0 = 14 + col * cellW;
-            float rowY = y - row * (cellH + 4);
-            Btn("Preset" + i, p.transform, BuildController.StationPresets[i].label, 17,
-                new Vector2(0, 1), new Vector2(0, 1),
-                new Vector2(x0, rowY - cellH), new Vector2(x0 + cellW - 4, rowY),
-                () => BC.ApplyStationPreset(idx));
+            int index = i;
+            int col = i % cols;
+            int row = i / cols;
+            float x0 = col / (float)cols;
+            float x1 = (col + 1) / (float)cols;
+            float rowTop = y - row * (cellH + 5f);
+            var image = Btn("Preset" + i, panel.transform,
+                BuildController.StationPresets[i].label, 18,
+                new Vector2(x0, 1f), new Vector2(x1, 1f),
+                new Vector2(col == 0 ? 16f : 4f, rowTop - cellH),
+                new Vector2(col == cols - 1 ? -16f : -4f, rowTop),
+                () => { BC.ApplyStationPreset(index); RefreshStationPanel(); });
+            stationPresetBtns.Add(image);
         }
-        int presetRows = (BuildController.StationPresets.Length + cols - 1) / cols;
-        y -= presetRows * (cellH + 4) + 10;
-        carsVal = ParamRow(p.transform, "対応両数", ref y, () => ChangeCars(-1), () => ChangeCars(1));
-        facesVal = ParamRow(p.transform, "ホーム(面)", ref y, () => ChangeFaces(-1), () => ChangeFaces(1));
-        linesVal = ParamRow(p.transform, "番線(線)", ref y, () => ChangeLines(-1), () => ChangeLines(1));
-        Btn("Yaw", p.transform, "向きを45°回転", 26, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 56), new Vector2(-14, y), RotatePreview);
-        y -= 68;
-        costText = Label("Cost", p.transform, "", 26, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 44), new Vector2(-14, y), TextAnchor.MiddleLeft);
-        y -= 52;
-        var confirmImg = Btn("Confirm", p.transform, "ここに建設", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 66), new Vector2(-14, y), () => BC.ConfirmStation(), BtnActive);
-        confirmBtnLabel = confirmImg.GetComponentInChildren<Text>();
-        y -= 78;
-        Label("Hint", p.transform, "地面をタップして位置を選択\n→「ここに建設」で確定", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(14, y - 70), new Vector2(-14, y), TextAnchor.UpperLeft);
+        y -= 2f * (cellH + 5f) + 8f;
+        carsVal = ParamRow(panel.transform, "対応両数", ref y,
+            () => ChangeCars(-1), () => ChangeCars(1));
+        facesVal = ParamRow(panel.transform, "ホーム面数", ref y,
+            () => ChangeFaces(-1), () => ChangeFaces(1));
+        linesVal = ParamRow(panel.transform, "線路本数", ref y,
+            () => ChangeLines(-1), () => ChangeLines(1));
+        Btn("Yaw", panel.transform, "駅の向きを45°回転", 24,
+            new Vector2(0f, 1f), Vector2.one, new Vector2(16f, y - 56f),
+            new Vector2(-16f, y), RotatePreview);
+        y -= 64f;
+        costText = Label("Cost", panel.transform, "", 25,
+            new Vector2(0f, 1f), Vector2.one, new Vector2(16f, y - 44f),
+            new Vector2(-16f, y), TextAnchor.MiddleLeft);
+        y -= 50f;
+        stationConfirmImage = Btn("Confirm", panel.transform, "ここに建設", 28,
+            new Vector2(0f, 1f), new Vector2(0.68f, 1f),
+            new Vector2(16f, y - 64f), new Vector2(-5f, y),
+            () => BC.ConfirmStation(), BtnActive);
+        stationConfirmButton = stationConfirmImage.GetComponent<Button>();
+        confirmBtnLabel = stationConfirmImage.GetComponentInChildren<Text>();
+        Btn("Cancel", panel.transform, "やめる", 23,
+            new Vector2(0.69f, 1f), Vector2.one,
+            new Vector2(5f, y - 64f), new Vector2(-16f, y),
+            () => BC.SetMode(BuildController.Mode.View));
     }
 
-    Text ParamRow(Transform parent, string title, ref float y, UnityEngine.Events.UnityAction minus, UnityEngine.Events.UnityAction plus)
+    Text ParamRow(Transform parent, string title, ref float y,
+        UnityEngine.Events.UnityAction minus, UnityEngine.Events.UnityAction plus)
     {
-        Label("L" + title, parent, title, 26, new Vector2(0, 1), new Vector2(0.45f, 1), new Vector2(14, y - 56), new Vector2(0, y), TextAnchor.MiddleLeft);
-        Btn("-" + title, parent, "-", 34, new Vector2(0.46f, 1), new Vector2(0.62f, 1), new Vector2(0, y - 56), new Vector2(0, y), minus);
-        var v = Label("V" + title, parent, "", 28, new Vector2(0.62f, 1), new Vector2(0.82f, 1), new Vector2(0, y - 56), new Vector2(0, y), TextAnchor.MiddleCenter);
-        Btn("+" + title, parent, "+", 34, new Vector2(0.82f, 1), new Vector2(0.98f, 1), new Vector2(0, y - 56), new Vector2(0, y), plus);
-        y -= 64;
-        return v;
+        Label("Label" + title, parent, title, 24, new Vector2(0f, 1f),
+            new Vector2(0.42f, 1f), new Vector2(16f, y - 56f),
+            new Vector2(0f, y), TextAnchor.MiddleLeft);
+        Btn("Minus" + title, parent, "−", 32, new Vector2(0.43f, 1f),
+            new Vector2(0.59f, 1f), new Vector2(0f, y - 56f), new Vector2(-3f, y), minus);
+        var value = Label("Value" + title, parent, "", 27,
+            new Vector2(0.60f, 1f), new Vector2(0.82f, 1f),
+            new Vector2(2f, y - 56f), new Vector2(-2f, y), TextAnchor.MiddleCenter);
+        Btn("Plus" + title, parent, "＋", 31, new Vector2(0.83f, 1f), Vector2.one,
+            new Vector2(3f, y - 56f), new Vector2(-16f, y), plus);
+        y -= 63f;
+        return value;
     }
 
-    void ChangeCars(int d) { BC.pCars = Mathf.Clamp(BC.pCars + d, 2, 10); BC.ApplyPreviewParams(); }
-    void ChangeFaces(int d)
+    void ChangeCars(int delta)
     {
-        BC.pFaces = Mathf.Clamp(BC.pFaces + d, 1, 4);
-        // M2-D: 面数より線数が1つ少なくても各面が物理線に接続できる
-        // (例: 3面2線)。最低構成はMax(1,faces-1)まで許容する
+        BC.pCars = Mathf.Clamp(BC.pCars + delta, 2, 10);
+        BC.ApplyPreviewParams();
+        RefreshStationPanel();
+    }
+
+    void ChangeFaces(int delta)
+    {
+        BC.pFaces = Mathf.Clamp(BC.pFaces + delta, 1, 4);
         BC.pLines = Mathf.Clamp(BC.pLines, Mathf.Max(1, BC.pFaces - 1), 8);
         BC.ApplyPreviewParams();
-    }
-    void ChangeLines(int d) { BC.pLines = Mathf.Clamp(BC.pLines + d, Mathf.Max(1, BC.pFaces - 1), 8); BC.ApplyPreviewParams(); }
-    void RotatePreview() { BC.pYaw = Mathf.Repeat(BC.pYaw + 45f, 360f); BC.ApplyPreviewParams(); }
-
-    void BuildTrainPanel()
-    {
-        var p = Panel("TrainPanel", transform, new Vector2(1, 0.5f), new Vector2(1, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
-        var rt = p.rectTransform;
-        rt.pivot = new Vector2(1, 0.5f);
-        rt.anchoredPosition = new Vector2(-8, 40);
-        rt.sizeDelta = new Vector2(362, 968);
-        trainPanel = p.gameObject;
-
-        tabServiceBtn = Btn("TabS", p.transform, "系統をつくる", 23, new Vector2(0, 1), new Vector2(0.5f, 1), new Vector2(10, -62), new Vector2(-3, -10), () => SetTab(0));
-        tabDispatchBtn = Btn("TabD", p.transform, "列車を配置", 23, new Vector2(0.5f, 1), new Vector2(1, 1), new Vector2(3, -62), new Vector2(-10, -10), () => SetTab(1));
-
-        serviceTab = Rect("ServiceTab", p.transform, Vector2.zero, Vector2.one, new Vector2(10, 12), new Vector2(-10, -70)).gameObject;
-        dispatchView = Rect("DispatchView", p.transform, Vector2.zero, Vector2.one, new Vector2(10, 12), new Vector2(-10, -70)).gameObject;
-        BuildServiceTab(serviceTab.transform);
-        BuildDispatchView(dispatchView.transform);
+        RefreshStationPanel();
     }
 
-    void BuildServiceTab(Transform parent)
+    void ChangeLines(int delta)
     {
-        // 一覧ビュー(Manage)
-        lineListView = Rect("LineList", parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject;
-        Btn("NewLine", lineListView.transform, "＋ 新しい系統を作る", 25, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -58), new Vector2(0, -2), () => BC.BeginCreateLine(), BtnActive);
-        Label("LLTitle", lineListView.transform, "運行系統一覧", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -98), new Vector2(-2, -66), TextAnchor.MiddleLeft);
-        lineListRows = Rect("Rows", lineListView.transform, Vector2.zero, Vector2.one, Vector2.zero, new Vector2(0, -102));
+        BC.pLines = Mathf.Clamp(BC.pLines + delta, Mathf.Max(1, BC.pFaces - 1), 8);
+        BC.ApplyPreviewParams();
+        RefreshStationPanel();
+    }
 
-        // 作成ビュー(CreateLine)
-        createView = Rect("Create", parent, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero).gameObject;
-        Label("CT", createView.transform, "種別を選択", 22, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -34), new Vector2(-2, -2), TextAnchor.MiddleLeft);
-        typeBtns = new Image[ServiceType.Names.Length];
-        for (int i = 0; i < ServiceType.Names.Length; i++)
+    void RotatePreview()
+    {
+        BC.pYaw = Mathf.Repeat(BC.pYaw + 45f, 360f);
+        BC.ApplyPreviewParams();
+    }
+
+    void RefreshStationPanel()
+    {
+        if (stationPanel == null || BC == null) return;
+        carsVal.text = BC.pCars + "両";
+        facesVal.text = BC.pFaces + "面";
+        linesVal.text = BC.pLines + "線";
+        for (int i = 0; i < stationPresetBtns.Count; i++)
         {
-            int ti = i;
-            float w = 1f / ServiceType.Names.Length;
-            typeBtns[i] = Btn("Ty" + i, createView.transform, ServiceType.Names[i], 22,
-                new Vector2(i * w + 0.01f, 1), new Vector2((i + 1) * w - 0.01f, 1),
-                new Vector2(0, -92), new Vector2(0, -40), () => BC.SetNewLineType(ti));
+            var preset = BuildController.StationPresets[i];
+            stationPresetBtns[i].color = preset.faces == BC.pFaces && preset.lines == BC.pLines
+                ? BtnSelected : BtnBg;
         }
-        // 駅検索(マップをタップする代わりに駅名で経路に追加する)。結果行のタップは
-        // マップの駅タップと全く同じBC.TapRouteStation(重複チェック・接続チェック・
-        // 番線ピッカー表示)へ合流する
-        Label("StSearchLbl", createView.transform, "駅を検索して経路に追加", 19, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -124), new Vector2(-2, -98), TextAnchor.MiddleLeft);
-        var searchBoxImg = Panel("StSearchBox", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -172), new Vector2(0, -130), new Color(0.96f, 0.97f, 0.99f, 1f));
-        stationSearchInput = searchBoxImg.gameObject.AddComponent<InputField>();
-        var searchTxt = Label("StSearchTxt", searchBoxImg.transform, "", 22, Vector2.zero, Vector2.one, new Vector2(12, 2), new Vector2(-12, -2), TextAnchor.MiddleLeft);
-        searchTxt.color = new Color(0.1f, 0.1f, 0.13f);
-        searchTxt.supportRichText = false;
-        var searchPh = Label("StSearchPh", searchBoxImg.transform, "駅名を入力", 22, Vector2.zero, Vector2.one, new Vector2(12, 2), new Vector2(-12, -2), TextAnchor.MiddleLeft);
-        searchPh.color = new Color(0.45f, 0.45f, 0.5f);
-        stationSearchInput.textComponent = searchTxt;
-        stationSearchInput.placeholder = searchPh;
-        stationSearchInput.targetGraphic = searchBoxImg;
-        stationSearchInput.characterLimit = 24;
-        stationSearchInput.lineType = InputField.LineType.SingleLine;
-        stationSearchInput.onValueChanged.AddListener(OnStationSearchChanged);
-        stationSearchRows = Rect("StSearchRows", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -338), new Vector2(0, -178));
 
-        var prRt = Rect("PlatformRow", createView.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -396), new Vector2(0, -344));
-        platformRow = prRt.gameObject;
-        platformRow.SetActive(false);
-        routeText = Label("Route", createView.transform, "", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -522), new Vector2(-2, -402), TextAnchor.UpperLeft);
-        Btn("SaveLine", createView.transform, "系統を保存", 26, new Vector2(0, 1), new Vector2(0.6f, 1), new Vector2(0, -582), new Vector2(-3, -528), () => BC.SaveNewLine(), BtnActive);
-        Btn("CancelLine", createView.transform, "やめる", 24, new Vector2(0.62f, 1), new Vector2(1, 1), new Vector2(3, -582), new Vector2(0, -528), () => BC.CancelCreateLine());
-    }
-
-    // 駅検索欄の入力に応じて、駅名が部分一致する駅を結果行として並べる。
-    // 空欄では何も出さない(路線数が多いと全駅列挙が埋もれるため)
-    void OnStationSearchChanged(string query)
-    {
-        if (stationSearchRows == null) return;
-        for (int i = stationSearchRows.childCount - 1; i >= 0; i--) Destroy(stationSearchRows.GetChild(i).gameObject);
-        if (string.IsNullOrEmpty(query)) return;
-        float y = -2;
-        foreach (var st in TrackNetwork.stations)
+        double newCost = GameState.StationCost(BC.pCars, BC.pFaces, BC.pLines);
+        bool affordable;
+        if (BC.rebuildTarget != null)
         {
-            if (st.id == 0 || st.preview) continue;
-            if (st.stationName.IndexOf(query, System.StringComparison.OrdinalIgnoreCase) < 0) continue;
-            var s = st;
-            Btn("SS" + s.id, stationSearchRows, s.stationName, 19, new Vector2(0, 1), new Vector2(1, 1),
-                new Vector2(0, y - 40), new Vector2(0, y), () => BC.TapRouteStation(s));
-            y -= 44;
-        }
-    }
-
-    // 系統作成の中断・番線選択のやり直し等で、検索欄と結果行を空に戻す
-    public void ClearStationSearch()
-    {
-        if (stationSearchInput != null) stationSearchInput.text = "";
-        if (stationSearchRows != null)
-            for (int i = stationSearchRows.childCount - 1; i >= 0; i--) Destroy(stationSearchRows.GetChild(i).gameObject);
-    }
-
-    void BuildDispatchView(Transform parent)
-    {
-        float y = -2;
-        Label("DT", parent, "編成を選ぶ", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 28), new Vector2(-2, y), TextAnchor.MiddleLeft);
-        y -= 34;
-        foreach (var fm in TrainCatalog.Formations)
-        {
-            var f = fm;
-            var img = Btn("F" + f.Label, parent, f.Label + "  " + (f.CostYen / 1e8).ToString("F0") + "億円", 21,
-                new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 46), new Vector2(0, y), () => SelectFormation(f));
-            fmBtns.Add(new KeyValuePair<TrainCatalog.Formation, Image>(f, img));
-            y -= 50;
-        }
-        fmInfoText = Label("FmInfo", parent, "編成を選択してください", 19, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 42), new Vector2(-2, y), TextAnchor.UpperLeft);
-        y -= 48;
-        Label("DLT", parent, "系統を運用に追加(タップ)", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 28), new Vector2(-2, y), TextAnchor.MiddleLeft);
-        y -= 32;
-        dispatchLineRows = Rect("DRows", parent, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 150), new Vector2(0, y));
-        y -= 156;
-        Label("ITT", parent, "この列車の運用(順に走る)", 21, new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, y - 28), new Vector2(-2, y), TextAnchor.MiddleLeft);
-        y -= 32;
-        itineraryRows = Rect("ITRows", parent, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 176), new Vector2(0, y));
-        y -= 182;
-        Btn("Dispatch", parent, "この運用で配置(購入)", 24, new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, y - 54), new Vector2(0, y), () => BC.DispatchTrain(), BtnActive);
-    }
-
-    // 運用(順序付き)の行: 番号・種別色ラベル・上下・削除
-    void BuildItineraryRows()
-    {
-        if (itineraryRows == null) return;
-        for (int i = itineraryRows.childCount - 1; i >= 0; i--) Destroy(itineraryRows.GetChild(i).gameObject);
-        if (BC.selLines.Count == 0)
-        {
-            Label("ite", itineraryRows, "上の系統をタップして運用を組む", 19,
-                new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -52), new Vector2(-2, -2), TextAnchor.UpperLeft);
-            return;
-        }
-        float y = -2;
-        for (int i = 0; i < BC.selLines.Count; i++)
-        {
-            int idx = i;
-            var l = BC.selLines[i];
-            var tc = l.TypeColor;
-            Label("N" + i, itineraryRows, (i + 1) + ".", 20, new Vector2(0, 1), new Vector2(0.1f, 1), new Vector2(2, y - 46), new Vector2(0, y), TextAnchor.MiddleCenter);
-            Btn("IL" + i, itineraryRows, l.DisplayName, 18, new Vector2(0.1f, 1), new Vector2(0.62f, 1), new Vector2(0, y - 46), new Vector2(-2, y), () => { }, new Color(tc.r, tc.g, tc.b, 0.85f));
-            Btn("Up" + i, itineraryRows, "↑", 22, new Vector2(0.62f, 1), new Vector2(0.74f, 1), new Vector2(1, y - 46), new Vector2(-1, y), () => BC.MoveItinerary(idx, -1));
-            Btn("Dn" + i, itineraryRows, "↓", 22, new Vector2(0.74f, 1), new Vector2(0.86f, 1), new Vector2(1, y - 46), new Vector2(-1, y), () => BC.MoveItinerary(idx, 1));
-            Btn("Rm" + i, itineraryRows, "×", 22, new Vector2(0.86f, 1), new Vector2(1, 1), new Vector2(1, y - 46), new Vector2(0, y), () => BC.RemoveFromItinerary(idx), new Color(0.55f, 0.22f, 0.24f, 0.95f));
-            y -= 52;
-        }
-    }
-
-    void SetTab(int t)
-    {
-        if (t == 0) BC.GoManageTab();
-        else BC.GoDispatchTab();
-    }
-
-    // 列車パネルの表示をBC.trainSub/系統一覧に合わせて更新
-    public void RefreshTrainPanel()
-    {
-        if (serviceTab == null) return;
-        bool dispatch = BC.trainSub == BuildController.TrainSub.Dispatch;
-        serviceTab.SetActive(!dispatch);
-        dispatchView.SetActive(dispatch);
-        if (tabServiceBtn != null) tabServiceBtn.color = dispatch ? BtnBg : BtnActive;
-        if (tabDispatchBtn != null) tabDispatchBtn.color = dispatch ? BtnActive : BtnBg;
-
-        if (!dispatch)
-        {
-            bool creating = BC.trainSub == BuildController.TrainSub.CreateLine;
-            lineListView.SetActive(!creating);
-            createView.SetActive(creating);
-            if (creating)
-            {
-                for (int i = 0; i < typeBtns.Length; i++)
-                    typeBtns[i].color = i == BC.newLineType ? ServiceType.Colors[i] : BtnBg;
-                UpdateRouteLabel();
-            }
-            else BuildLineRows(lineListRows, false);
+            stationTitle.text = "駅を建て替える";
+            confirmBtnLabel.text = "建て替え確定";
+            double delta = newCost - GameState.StationCost(
+                BC.rebuildTarget.cars, BC.rebuildTarget.faces, BC.rebuildTarget.lines);
+            affordable = delta <= 0 || GameState.money >= delta;
+            costText.text = delta > 0 ? "追加費用　" + (delta / 1e8).ToString("F1") + "億円"
+                : delta < 0 ? "払戻　" + (-delta * 0.5 / 1e8).ToString("F1") + "億円"
+                : "費用なし";
         }
         else
         {
-            BuildLineRows(dispatchLineRows, true);
-            BuildItineraryRows();
-            foreach (var kv in fmBtns) kv.Value.color = kv.Key == BC.selFormation ? BtnActive : BtnBg;
+            stationTitle.text = "駅を建てる";
+            confirmBtnLabel.text = BC.previewStation == null ? "位置を選んでください" : "ここに建設";
+            affordable = GameState.money >= newCost;
+            costText.text = "建設費　" + (newCost / 1e8).ToString("F1") + "億円";
         }
+        costText.color = affordable ? TxtCol : new Color(1f, 0.46f, 0.46f);
+        stationConfirmButton.interactable =
+            (BC.previewStation != null || BC.rebuildTarget != null) && affordable;
+        stationConfirmImage.color = stationConfirmButton.interactable ? BtnActive : BtnBg;
     }
 
-    void BuildLineRows(RectTransform container, bool forDispatch)
+    // ---- 系統 / 配車 ----
+
+    void BuildTrainPanel()
     {
-        if (container == null) return;
-        for (int i = container.childCount - 1; i >= 0; i--) Destroy(container.GetChild(i).gameObject);
+        var panel = Panel("TrainPanel", safeRoot, Vector2.zero, Vector2.zero,
+            Vector2.zero, Vector2.zero, PanelBg);
+        trainPanel = panel.gameObject;
+        trainPanelRt = panel.rectTransform;
+        Label("Title", panel.transform, "系統と列車", 31, new Vector2(0f, 1f),
+            new Vector2(0.72f, 1f), new Vector2(16f, -60f),
+            new Vector2(0f, -10f), TextAnchor.MiddleLeft);
+        Btn("Close", panel.transform, "閉じる", 21, new Vector2(0.74f, 1f), Vector2.one,
+            new Vector2(0f, -58f), new Vector2(-12f, -10f),
+            () => BC.SetMode(BuildController.Mode.View));
+        Btn("ServiceTab", panel.transform, "系統をつくる", 23,
+            new Vector2(0f, 1f), new Vector2(0.5f, 1f),
+            new Vector2(12f, -120f), new Vector2(-4f, -66f), () => SetTrainTab(false));
+        Btn("DispatchTab", panel.transform, "列車を配置", 23,
+            new Vector2(0.5f, 1f), Vector2.one,
+            new Vector2(4f, -120f), new Vector2(-12f, -66f), () => SetTrainTab(true));
+        trainContent = ScrollColumn("TrainScroll", panel.transform,
+            new Vector2(8f, 10f), new Vector2(-8f, -128f), out trainScroll);
+    }
+
+    void SetTrainTab(bool dispatch)
+    {
+        if (dispatch) BC.GoDispatchTab();
+        else BC.GoManageTab();
+    }
+
+    public void RefreshTrainPanel()
+    {
+        if (trainContent == null || BC == null) return;
+        bool resetScroll = lastTrainSub != BC.trainSub;
+        lastTrainSub = BC.trainSub;
+        for (int i = trainContent.childCount - 1; i >= 0; i--)
+            Destroy(trainContent.GetChild(i).gameObject);
+        stationSearchInput = null;
+        stationSearchRows = null;
+        platformRow = null;
+        routeText = null;
+        saveLineImage = null;
+        dispatchImage = null;
+
+        var tabService = trainPanel.transform.Find("ServiceTab").GetComponent<Image>();
+        var tabDispatch = trainPanel.transform.Find("DispatchTab").GetComponent<Image>();
+        bool dispatch = BC.trainSub == BuildController.TrainSub.Dispatch;
+        tabService.color = dispatch ? BtnBg : BtnActive;
+        tabDispatch.color = dispatch ? BtnActive : BtnBg;
+
+        if (dispatch) BuildDispatchFlow();
+        else if (BC.trainSub == BuildController.TrainSub.CreateLine) BuildCreateLineFlow();
+        else BuildManageFlow();
+
+        Canvas.ForceUpdateCanvases();
+        if (resetScroll && trainScroll != null) trainScroll.verticalNormalizedPosition = 1f;
+    }
+
+    void BuildManageFlow()
+    {
+        FlowLabel("Intro", trainContent,
+            "停車駅と番線を順に登録して、列車が走る運行系統を作ります。", 21, 66f,
+            TextAnchor.MiddleLeft, MutedTxt);
+        FlowButton("NewLine", trainContent, "＋ 新しい系統を作る", 25,
+            MinimumPrimaryButtonHeight + 6f, () => BC.BeginCreateLine(), BtnActive);
+        FlowLabel("ListTitle", trainContent, "運行系統", 23, 42f);
         if (Services.lines.Count == 0)
         {
-            Label("empty", container, forDispatch ? "先に「系統をつくる」で作成してください" : "系統がありません。上のボタンで作成", 20,
-                new Vector2(0, 1), new Vector2(1, 1), new Vector2(2, -56), new Vector2(-2, -2), TextAnchor.UpperLeft);
+            FlowLabel("Empty", trainContent, "まだ系統がありません。上のボタンから作成してください。",
+                20, 70f, TextAnchor.UpperLeft, MutedTxt);
             return;
         }
-        float y = -2;
         foreach (var line in Services.lines)
         {
-            var l = line;
-            var tc = l.TypeColor;
-            string label = l.DisplayName + "  ×" + l.TrainCount + "本";
-            if (forDispatch)
-            {
-                Btn("L" + l.id, container, "＋ " + label, 19, new Vector2(0, 1), new Vector2(1, 1),
-                    new Vector2(0, y - 46), new Vector2(0, y), () => BC.AddToItinerary(l), new Color(tc.r, tc.g, tc.b, 0.85f));
-                y -= 52;
-                continue;
-            }
-            else
-            {
-                Btn("L" + l.id, container, label, 20, new Vector2(0, 1), new Vector2(0.78f, 1),
-                    new Vector2(0, y - 52), new Vector2(-3, y), () => { }, new Color(tc.r, tc.g, tc.b, 0.85f));
-                Btn("Del" + l.id, container, "廃止", 20, new Vector2(0.8f, 1), new Vector2(1, 1),
-                    new Vector2(3, y - 52), new Vector2(0, y), () => BC.DeleteLine(l), new Color(0.55f, 0.22f, 0.24f, 0.95f));
-            }
-            y -= 58;
+            var captured = line;
+            var row = FlowRow("Line" + line.id, trainContent, 62f);
+            var color = line.TypeColor;
+            FlowButton("Summary", row,
+                line.DisplayName + "　列車" + line.TrainCount + "本", 20, 62f,
+                () => ShowLineSummary(captured), new Color(color.r, color.g, color.b, 0.92f),
+                -1f, 1f);
+            FlowButton("Delete", row, "廃止", 20, 62f,
+                () => ConfirmLineDelete(captured), Danger, 92f, 0f);
         }
     }
 
-    void SelectFormation(TrainCatalog.Formation f)
+    void ShowLineSummary(ServiceLine line)
     {
-        BC.selFormation = f;
-        foreach (var kv in fmBtns) kv.Value.color = kv.Key == f ? BtnActive : BtnBg;
-        fmInfoText.text = f.Label + ": 定員" + f.Capacity + "人 / 最高" + f.type.maxSpeedKmh + "km/h\n停車駅は" + f.cars + "両以上対応が必要";
+        var names = new List<string>();
+        foreach (var st in line.route) names.Add(st.stationName);
+        Toast(line.DisplayName + "：" + string.Join(" → ", names.ToArray()));
+    }
+
+    void ConfirmLineDelete(ServiceLine line)
+    {
+        string extra = line.TrainCount > 0
+            ? "\nこの系統を走る列車" + line.TrainCount + "本も撤去されます。"
+            : "";
+        ShowConfirm("系統を廃止しますか？",
+            line.DisplayName + "を廃止します。" + extra + "\nこの操作は取り消せません。",
+            () => BC.DeleteLine(line));
+    }
+
+    void BuildCreateLineFlow()
+    {
+        FlowLabel("Step1", trainContent, "1　列車種別を選ぶ", 23, 38f);
+        var typeRow = FlowRow("Types", trainContent, 58f, 5f);
+        for (int i = 0; i < ServiceType.Names.Length; i++)
+        {
+            int type = i;
+            var image = FlowButton("Type" + i, typeRow, ServiceType.Names[i], 20, 58f,
+                () => BC.SetNewLineType(type),
+                i == BC.newLineType ? ServiceType.Colors[i] : BtnBg);
+            image.color = i == BC.newLineType ? ServiceType.Colors[i] : BtnBg;
+        }
+
+        FlowLabel("Step2", trainContent, "2　停車駅を順番に追加する", 23, 38f);
+        FlowLabel("MapHelp", trainContent,
+            "地図の駅をタップするか、駅名で検索してください。駅ごとに使う番線を選びます。",
+            19, 62f, TextAnchor.MiddleLeft, MutedTxt);
+        stationSearchInput = FlowInput("StationSearch", trainContent, "駅名で検索", 52f);
+        stationSearchInput.onValueChanged.AddListener(OnStationSearchChanged);
+
+        stationSearchRows = Rect("SearchResults", trainContent, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero);
+        var searchLayout = stationSearchRows.gameObject.AddComponent<VerticalLayoutGroup>();
+        searchLayout.spacing = 5f;
+        searchLayout.childControlHeight = true;
+        searchLayout.childControlWidth = true;
+        searchLayout.childForceExpandHeight = false;
+        searchLayout.childForceExpandWidth = true;
+        var searchElement = stationSearchRows.gameObject.AddComponent<LayoutElement>();
+        searchElement.preferredHeight = 0f;
+
+        if (BC.pendingStation != null)
+        {
+            FlowLabel("PlatformPrompt", trainContent,
+                BC.pendingStation.stationName + "：使用する番線", 22, 38f);
+            platformRow = FlowRow("PlatformRow", trainContent, 58f, 5f);
+            int count = BC.pendingStation.PlatformCount;
+            for (int i = 0; i < count; i++)
+            {
+                int platform = i + 1;
+                FlowButton("Platform" + platform, platformRow, platform + "番", 21, 58f,
+                    () => BC.AddRouteStop(platform), BtnBlue);
+            }
+        }
+
+        FlowLabel("Step3", trainContent, "3　経路を確認して保存", 23, 38f);
+        float routeHeight = Mathf.Clamp(72f + BC.routeSel.Count * 12f, 72f, 170f);
+        routeText = FlowLabel("Route", trainContent, "", 20, routeHeight,
+            TextAnchor.UpperLeft, TxtCol);
+        var actions = FlowRow("Actions", trainContent, 62f);
+        saveLineImage = FlowButton("SaveLine", actions, "系統を保存", 24, 62f,
+            () => BC.SaveNewLine(), BtnActive);
+        FlowButton("CancelLine", actions, "やめる", 22, 62f,
+            () => BC.CancelCreateLine(), BtnBg, 126f, 0f);
+        UpdateRouteLabel();
+    }
+
+    InputField FlowInput(string name, Transform parent, string placeholder, float height)
+    {
+        var image = Panel(name, parent, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero, new Color(0.96f, 0.97f, 0.99f, 1f));
+        var le = image.gameObject.AddComponent<LayoutElement>();
+        le.minHeight = height;
+        le.preferredHeight = height;
+        var input = image.gameObject.AddComponent<InputField>();
+        var text = Label("Text", image.transform, "", 23, Vector2.zero, Vector2.one,
+            new Vector2(12f, 3f), new Vector2(-12f, -3f), TextAnchor.MiddleLeft);
+        text.color = new Color(0.08f, 0.10f, 0.14f);
+        text.supportRichText = false;
+        var hint = Label("Placeholder", image.transform, placeholder, 23,
+            Vector2.zero, Vector2.one, new Vector2(12f, 3f),
+            new Vector2(-12f, -3f), TextAnchor.MiddleLeft);
+        hint.color = new Color(0.43f, 0.47f, 0.53f);
+        input.textComponent = text;
+        input.placeholder = hint;
+        input.targetGraphic = image;
+        input.characterLimit = 24;
+        input.lineType = InputField.LineType.SingleLine;
+        return input;
+    }
+
+    void OnStationSearchChanged(string query)
+    {
+        if (stationSearchRows == null) return;
+        for (int i = stationSearchRows.childCount - 1; i >= 0; i--)
+            Destroy(stationSearchRows.GetChild(i).gameObject);
+        var element = stationSearchRows.GetComponent<LayoutElement>();
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            element.preferredHeight = 0f;
+            return;
+        }
+
+        int matches = 0;
+        foreach (var station in TrackNetwork.stations)
+        {
+            if (station.id == 0 || station.preview) continue;
+            if (station.stationName.IndexOf(query, StringComparison.OrdinalIgnoreCase) < 0) continue;
+            var captured = station;
+            FlowButton("Station" + station.id, stationSearchRows, station.stationName,
+                20, 50f, () => BC.TapRouteStation(captured), BtnBlue);
+            matches++;
+            if (matches >= 6) break;
+        }
+        if (matches == 0)
+        {
+            FlowLabel("NoResult", stationSearchRows, "一致する駅がありません", 19, 48f,
+                TextAnchor.MiddleLeft, MutedTxt);
+            matches = 1;
+        }
+        element.preferredHeight = matches * 55f;
+        Canvas.ForceUpdateCanvases();
+    }
+
+    void BuildDispatchFlow()
+    {
+        FlowLabel("Intro", trainContent,
+            "編成と運行系統を選び、1本の列車として配置します。複数系統を順につなげられます。",
+            20, 66f, TextAnchor.MiddleLeft, MutedTxt);
+        FlowLabel("Step1", trainContent, "1　購入する編成", 23, 38f);
+        foreach (var formation in TrainCatalog.Formations)
+        {
+            var captured = formation;
+            bool selected = BC.selFormation == formation;
+            FlowButton("Formation" + formation.Label, trainContent,
+                (selected ? "選択中　" : "") + formation.Label + "　" +
+                (formation.CostYen / 1e8).ToString("F0") + "億円", 20, 52f,
+                () => SelectFormation(captured), selected ? BtnSelected : BtnBg);
+        }
+        string formationInfo = BC.selFormation == null
+            ? "編成を選んでください"
+            : "定員" + BC.selFormation.Capacity + "人／最高" +
+              BC.selFormation.type.maxSpeedKmh + "km/h／" +
+              BC.selFormation.cars + "両対応ホームが必要";
+        FlowLabel("FormationInfo", trainContent, formationInfo, 19, 48f,
+            TextAnchor.MiddleLeft, MutedTxt);
+
+        FlowLabel("Step2", trainContent, "2　走らせる系統を追加", 23, 38f);
+        if (Services.lines.Count == 0)
+        {
+            FlowLabel("NoLines", trainContent,
+                "系統がありません。「系統をつくる」タブで先に作成してください。",
+                20, 66f, TextAnchor.MiddleLeft, MutedTxt);
+        }
+        else
+        {
+            foreach (var line in Services.lines)
+            {
+                var captured = line;
+                var color = line.TypeColor;
+                FlowButton("AddLine" + line.id, trainContent,
+                    "＋ " + line.DisplayName, 20, 52f, () => BC.AddToItinerary(captured),
+                    new Color(color.r, color.g, color.b, 0.92f));
+            }
+        }
+
+        FlowLabel("Step3", trainContent, "3　この列車の運用順", 23, 38f);
+        if (BC.selLines.Count == 0)
+        {
+            FlowLabel("EmptyItinerary", trainContent,
+                "上の系統をタップして追加してください。", 19, 52f,
+                TextAnchor.MiddleLeft, MutedTxt);
+        }
+        for (int i = 0; i < BC.selLines.Count; i++)
+        {
+            int index = i;
+            var line = BC.selLines[i];
+            var row = FlowRow("Itinerary" + i, trainContent, 54f, 5f);
+            FlowLabel("Name", row, (i + 1) + "　" + line.DisplayName, 19, 54f);
+            FlowButton("Up", row, "↑", 22, 54f,
+                () => BC.MoveItinerary(index, -1), BtnBg, 54f, 0f);
+            FlowButton("Down", row, "↓", 22, 54f,
+                () => BC.MoveItinerary(index, 1), BtnBg, 54f, 0f);
+            FlowButton("Remove", row, "×", 22, 54f,
+                () => BC.RemoveFromItinerary(index), Danger, 54f, 0f);
+        }
+        dispatchImage = FlowButton("Dispatch", trainContent, "この運用で列車を購入・配置", 24,
+            64f, () => BC.DispatchTrain(), BtnActive);
+        SetButtonEnabled(dispatchImage, BC.selFormation != null && BC.selLines.Count > 0);
+    }
+
+    void SelectFormation(TrainCatalog.Formation formation)
+    {
+        BC.selFormation = formation;
+        RefreshTrainPanel();
     }
 
     public void UpdateRouteLabel()
     {
-        if (routeText == null) return;
+        if (routeText == null || BC == null) return;
         if (BC.routeSel.Count == 0)
+            routeText.text = "停車駅はまだありません";
+        else
         {
-            routeText.text = "駅をタップ→番線を選ぶと経路になります";
-            return;
+            var names = new List<string>();
+            for (int i = 0; i < BC.routeSel.Count; i++)
+            {
+                var station = BC.routeSel[i];
+                int platform = station.PlatformNumberOf(BC.routeTrackSel[i]);
+                names.Add((i + 1) + ". " + station.stationName + "（" + platform + "番）");
+            }
+            routeText.text = string.Join("\n", names.ToArray());
         }
-        var names = new List<string>();
-        for (int i = 0; i < BC.routeSel.Count; i++)
-        {
-            var s = BC.routeSel[i];
-            int pf = s.PlatformNumberOf(BC.routeTrackSel[i]);
-            names.Add(s.stationName + "(" + pf + "番)");
-        }
-        routeText.text = "経路: " + string.Join(" → ", names.ToArray());
+        SetButtonEnabled(saveLineImage, BC.routeSel.Count >= 2);
     }
 
-    // pendingStationの番線ボタンを列車パネル内に動的生成
-    public void ShowPlatformPicker(Station st)
+    public void ShowPlatformPicker(Station station)
     {
-        HidePlatformPicker();
-        if (platformRow == null) return;
-        platformRow.SetActive(true);
-        int n = st.PlatformCount;
-        for (int i = 0; i < n; i++)
-        {
-            int pf = i + 1;
-            float w = 1f / n;
-            Btn("PF" + pf, platformRow.transform, pf + "番線", n > 4 ? 20 : 24,
-                new Vector2(i * w + 0.01f, 0.1f), new Vector2((i + 1) * w - 0.01f, 0.9f),
-                Vector2.zero, Vector2.zero, () => BC.AddRouteStop(pf), new Color(0.2f, 0.55f, 0.75f, 0.95f));
-        }
+        if (trainPanel != null && trainPanel.activeSelf) RefreshTrainPanel();
     }
 
     public void HidePlatformPicker()
     {
-        if (platformRow == null) return;
-        for (int i = platformRow.transform.childCount - 1; i >= 0; i--)
-            Destroy(platformRow.transform.GetChild(i).gameObject);
-        platformRow.SetActive(false);
+        if (trainPanel != null && trainPanel.activeSelf &&
+            BC != null && BC.trainSub == BuildController.TrainSub.CreateLine)
+            RefreshTrainPanel();
     }
+
+    public void ClearStationSearch()
+    {
+        if (stationSearchInput != null) stationSearchInput.SetTextWithoutNotify("");
+        if (stationSearchRows == null) return;
+        for (int i = stationSearchRows.childCount - 1; i >= 0; i--)
+            Destroy(stationSearchRows.GetChild(i).gameObject);
+        var element = stationSearchRows.GetComponent<LayoutElement>();
+        if (element != null) element.preferredHeight = 0f;
+    }
+
+    // ---- 駅情報 ----
 
     void BuildInfoPanel()
     {
-        var p = Panel("InfoPanel", transform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), Vector2.zero, Vector2.zero, PanelBg);
-        var rt = p.rectTransform;
-        rt.pivot = new Vector2(0.5f, 1);
-        rt.anchoredPosition = new Vector2(0, -120);
-        rt.sizeDelta = new Vector2(480, 440);
-        infoPanel = p.gameObject;
-        infoText = Label("Info", p.transform, "", 25, Vector2.zero, Vector2.one, new Vector2(16, 244), new Vector2(-16, -12), TextAnchor.UpperLeft);
-        // M2-D: ホーム縁(番線ごとの乗降モード)の設定画面を開く
-        Btn("PlatformEdges", p.transform, "番線ごとの乗降設定", 24, new Vector2(0.04f, 0), new Vector2(0.96f, 0), new Vector2(0, 184), new Vector2(0, 232), OnPlatformEdgesTap, new Color(0.3f, 0.5f, 0.36f, 0.95f));
-        Btn("Rename", p.transform, "名前を変更", 26, new Vector2(0.04f, 0), new Vector2(0.96f, 0), new Vector2(0, 126), new Vector2(0, 174), OnRenameTap, new Color(0.24f, 0.42f, 0.5f, 0.95f));
-        Btn("Rebuild", p.transform, "建て替え", 26, new Vector2(0.04f, 0), new Vector2(0.49f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRebuildTap, BtnActive);
-        Btn("Remove", p.transform, "撤去", 26, new Vector2(0.51f, 0), new Vector2(0.96f, 0), new Vector2(0, 70), new Vector2(0, 118), OnRemoveTap, new Color(0.55f, 0.22f, 0.24f, 0.95f));
-        Btn("Close", p.transform, "閉じる", 24, new Vector2(0.3f, 0), new Vector2(0.7f, 0), new Vector2(0, 12), new Vector2(0, 60), HideStationInfo);
+        var panel = Panel("InfoPanel", safeRoot, Vector2.zero, Vector2.zero,
+            Vector2.zero, Vector2.zero, PanelBg);
+        infoPanel = panel.gameObject;
+        infoPanelRt = panel.rectTransform;
+        Label("Title", panel.transform, "駅の情報", 30, new Vector2(0f, 1f),
+            new Vector2(0.72f, 1f), new Vector2(16f, -60f),
+            new Vector2(0f, -10f), TextAnchor.MiddleLeft);
+        Btn("Close", panel.transform, "閉じる", 21, new Vector2(0.74f, 1f), Vector2.one,
+            new Vector2(0f, -58f), new Vector2(-12f, -10f), HideStationInfo);
+        infoText = Label("Info", panel.transform, "", 23, new Vector2(0f, 1f), Vector2.one,
+            new Vector2(16f, -226f), new Vector2(-16f, -70f), TextAnchor.UpperLeft);
+        Btn("Focus", panel.transform, "この駅を中心に見る", 22,
+            new Vector2(0.04f, 0f), new Vector2(0.96f, 0f),
+            new Vector2(0f, 252f), new Vector2(0f, 304f), FocusInfoStation, BtnBlue);
+        Btn("Edges", panel.transform, "番線ごとの乗降設定", 22,
+            new Vector2(0.04f, 0f), new Vector2(0.96f, 0f),
+            new Vector2(0f, 192f), new Vector2(0f, 244f), OnPlatformEdgesTap);
+        Btn("Rename", panel.transform, "駅名を変更", 22,
+            new Vector2(0.04f, 0f), new Vector2(0.96f, 0f),
+            new Vector2(0f, 132f), new Vector2(0f, 184f), OnRenameTap);
+        Btn("Rebuild", panel.transform, "建て替え", 23,
+            new Vector2(0.04f, 0f), new Vector2(0.49f, 0f),
+            new Vector2(0f, 72f), new Vector2(0f, 124f), OnRebuildTap, BtnSelected);
+        Btn("Remove", panel.transform, "撤去", 23,
+            new Vector2(0.51f, 0f), new Vector2(0.96f, 0f),
+            new Vector2(0f, 72f), new Vector2(0f, 124f), OnRemoveTap, Danger);
+        Btn("Dismiss", panel.transform, "閉じる", 21,
+            new Vector2(0.30f, 0f), new Vector2(0.70f, 0f),
+            new Vector2(0f, 14f), new Vector2(0f, 62f), HideStationInfo);
         infoPanel.SetActive(false);
     }
 
-    // 駅名入力: WebGLはブラウザのpromptを使い、それ以外(エディタ等)は自前のモーダル
+    void RefreshInfoText()
+    {
+        if (infoStation == null || infoText == null) return;
+        infoText.text = infoStation.stationName + "\n" +
+            infoStation.cars + "両対応　" + infoStation.faces + "面" +
+            infoStation.lines + "線\n" +
+            "待ち客　" + infoStation.TotalWaiting + " / " + infoStation.WaitingCap + "人\n" +
+            "発展レベル　" + infoStation.DevLevel + "　　接続駅　" +
+            TrackNetwork.Reachable(infoStation).Count + "駅";
+    }
+
+    void FocusInfoStation()
+    {
+        if (infoStation != null && rig != null)
+            rig.FocusOn(infoStation.transform.position, 165f);
+    }
+
+    public void ShowStationInfo(Station station)
+    {
+        infoStation = station;
+        infoPanel.SetActive(true);
+        RefreshInfoText();
+        ApplyResponsiveLayout();
+    }
+
+    public void HideStationInfo()
+    {
+        infoStation = null;
+        if (infoPanel != null) infoPanel.SetActive(false);
+        ApplyResponsiveLayout();
+    }
+
+    void OnRebuildTap()
+    {
+        if (infoStation != null) BC.BeginRebuild(infoStation);
+    }
+
+    void OnRemoveTap()
+    {
+        if (infoStation == null) return;
+        var station = infoStation;
+        ShowConfirm("駅を撤去しますか？",
+            station.stationName + "と、接続線路・通過列車・関連系統を削除します。\n" +
+            "建設費などの一部は払い戻されます。この操作は取り消せません。",
+            () =>
+            {
+                HideStationInfo();
+                BC.RemoveStation(station);
+            });
+    }
+
+    // ---- カメラ / 初心者ガイド ----
+
+    void BuildCameraTools()
+    {
+        var panel = Panel("CameraTools", safeRoot, Vector2.zero, Vector2.zero,
+            Vector2.zero, Vector2.zero, PanelBg);
+        cameraTools = panel.gameObject;
+        cameraToolsRt = panel.rectTransform;
+        Btn("ZoomIn", panel.transform, "＋", 32, new Vector2(0.08f, 0.76f),
+            new Vector2(0.92f, 0.98f), Vector2.zero, Vector2.zero,
+            () => { if (rig != null) rig.ZoomBy(0.72f); });
+        Btn("ZoomOut", panel.transform, "−", 32, new Vector2(0.08f, 0.52f),
+            new Vector2(0.92f, 0.74f), Vector2.zero, Vector2.zero,
+            () => { if (rig != null) rig.ZoomBy(1.38f); });
+        Btn("Rotate", panel.transform, "回転", 20, new Vector2(0.08f, 0.28f),
+            new Vector2(0.92f, 0.50f), Vector2.zero, Vector2.zero,
+            () => { if (rig != null) rig.RotateStep(); });
+        Btn("Home", panel.transform, "全体", 20, new Vector2(0.08f, 0.04f),
+            new Vector2(0.92f, 0.26f), Vector2.zero, Vector2.zero,
+            () => { if (rig != null) rig.FrameNetwork(); });
+    }
+
+    void BuildOnboarding()
+    {
+        var panel = Panel("NextAction", safeRoot, new Vector2(0.06f, 0f),
+            new Vector2(0.94f, 0f), Vector2.zero, Vector2.zero, PanelBg);
+        onboardingPanel = panel.gameObject;
+        onboardingRt = panel.rectTransform;
+        onboardingTitle = Label("Title", panel.transform, "", 27,
+            new Vector2(0f, 0.60f), Vector2.one, new Vector2(16f, 0f),
+            new Vector2(-16f, -10f), TextAnchor.MiddleLeft);
+        onboardingBody = Label("Body", panel.transform, "", 20,
+            new Vector2(0f, 0.28f), new Vector2(1f, 0.61f), new Vector2(16f, 0f),
+            new Vector2(-16f, 0f), TextAnchor.MiddleLeft);
+        var action = Btn("Action", panel.transform, "", 23,
+            new Vector2(0.04f, 0.05f), new Vector2(0.96f, 0.29f),
+            Vector2.zero, Vector2.zero, RunOnboardingAction, BtnActive);
+        onboardingButtonLabel = action.GetComponentInChildren<Text>();
+        onboardingPanel.SetActive(false);
+    }
+
+    void RefreshOnboarding()
+    {
+        if (onboardingPanel == null || BC == null) return;
+        int stage = -1;
+        if (BC.mode == BuildController.Mode.View && (rig == null || rig.cabTrain == null))
+        {
+            if (TrackNetwork.stations.Count == 0) stage = 0;
+            else if (TrackNetwork.stations.Count == 1) stage = 1;
+            else if (TrackNetwork.segments.Count == 0) stage = 2;
+            else if (Services.lines.Count == 0) stage = 3;
+            else if (TrackNetwork.trains.Count == 0) stage = 4;
+        }
+        onboardingStage = stage;
+        onboardingPanel.SetActive(stage >= 0);
+        if (stage < 0) return;
+        string[] titles =
+        {
+            "最初の駅を建てましょう", "次の駅を建てましょう", "駅を線路でつなぎましょう",
+            "運行系統を作りましょう", "列車を配置しましょう",
+        };
+        string[] bodies =
+        {
+            "駅を選び、地図上の建てたい場所をタップします。",
+            "列車を走らせるには、まず2つ以上の駅が必要です。",
+            "線路の種類を選び、始点と終点の駅を順にタップします。",
+            "停車駅と番線を登録すると、列車を配置できるようになります。",
+            "編成と系統を選ぶと、運行が始まります。",
+        };
+        string[] actions = { "駅を建てる", "2つ目の駅を建てる", "線路を敷く", "系統を作る", "列車を配置" };
+        onboardingTitle.text = titles[stage];
+        onboardingBody.text = bodies[stage];
+        onboardingButtonLabel.text = actions[stage];
+    }
+
+    void RunOnboardingAction()
+    {
+        if (onboardingStage == 0 || onboardingStage == 1)
+            BC.SetMode(BuildController.Mode.Station);
+        else if (onboardingStage == 2)
+            BC.SetMode(BuildController.Mode.Track);
+        else if (onboardingStage == 3)
+        {
+            BC.SetMode(BuildController.Mode.Train);
+            BC.BeginCreateLine();
+        }
+        else if (onboardingStage == 4)
+        {
+            BC.SetMode(BuildController.Mode.Train);
+            BC.GoDispatchTab();
+        }
+    }
+
+    // ---- モーダル ----
+
+    void BuildRenameModal()
+    {
+        var overlay = Panel("RenameModal", transform, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero, new Color(0f, 0f, 0f, 0.68f));
+        renameModal = overlay.gameObject;
+        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
+        box.rectTransform.sizeDelta = new Vector2(650f, 320f);
+        Label("Title", box.transform, "駅名を変更", 30, new Vector2(0f, 1f), Vector2.one,
+            new Vector2(24f, -68f), new Vector2(-24f, -16f), TextAnchor.MiddleLeft);
+        var inputImage = Panel("Input", box.transform, new Vector2(0f, 1f), Vector2.one,
+            new Vector2(24f, -162f), new Vector2(-24f, -84f),
+            new Color(0.96f, 0.97f, 0.99f, 1f));
+        renameInput = inputImage.gameObject.AddComponent<InputField>();
+        var text = Label("Text", inputImage.transform, "", 29, Vector2.zero, Vector2.one,
+            new Vector2(14f, 4f), new Vector2(-14f, -4f), TextAnchor.MiddleLeft);
+        text.color = new Color(0.08f, 0.10f, 0.14f);
+        text.supportRichText = false;
+        var placeholder = Label("Placeholder", inputImage.transform, "駅名を入力", 29,
+            Vector2.zero, Vector2.one, new Vector2(14f, 4f),
+            new Vector2(-14f, -4f), TextAnchor.MiddleLeft);
+        placeholder.color = new Color(0.43f, 0.47f, 0.53f);
+        renameInput.textComponent = text;
+        renameInput.placeholder = placeholder;
+        renameInput.targetGraphic = inputImage;
+        renameInput.characterLimit = 12;
+        renameInput.lineType = InputField.LineType.SingleLine;
+        Btn("OK", box.transform, "変更する", 26, new Vector2(0f, 0f),
+            new Vector2(0.49f, 0f), new Vector2(24f, 24f),
+            new Vector2(-4f, 94f), OnRenameOk, BtnActive);
+        Btn("Cancel", box.transform, "キャンセル", 24, new Vector2(0.51f, 0f),
+            new Vector2(1f, 0f), new Vector2(4f, 24f),
+            new Vector2(-24f, 94f), () => renameModal.SetActive(false));
+        renameModal.SetActive(false);
+    }
+
     void OnRenameTap()
     {
         if (infoStation == null) return;
@@ -592,64 +1125,48 @@ public class UIController : MonoBehaviour
         ApplyRename(renameInput.text);
     }
 
-    void ApplyRename(string name)
+    void ApplyRename(string value)
     {
         if (infoStation == null) return;
-        name = (name ?? "").Trim();
-        if (name.Length == 0) { Toast("駅名が空だったので変更しませんでした"); return; }
-        if (name.Length > 12) name = name.Substring(0, 12);
-        infoStation.stationName = name;
-        infoStation.gameObject.name = name;
+        value = (value ?? "").Trim();
+        if (value.Length == 0)
+        {
+            Toast("駅名が空のため変更しませんでした");
+            return;
+        }
+        if (value.Length > 12) value = value.Substring(0, 12);
+        infoStation.stationName = value;
+        infoStation.gameObject.name = value;
         infoStation.UpdateLabel();
-        ShowStationInfo(infoStation);   // 情報パネルを更新表示
+        RefreshInfoText();
         SaveLoad.Save();
-        Toast("駅名を「" + name + "」に変更しました");
+        Toast("駅名を「" + value + "」に変更しました");
     }
 
-    // エディタ/非WebGL用の駅名入力モーダル(uGUI InputField)
-    void BuildRenameModal()
-    {
-        var overlay = Panel("RenameModal", transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, new Color(0, 0, 0, 0.55f));
-        renameModal = overlay.gameObject;
-        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
-        box.rectTransform.sizeDelta = new Vector2(580, 300);
-        Label("T", box.transform, "駅名を変更", 30, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -66), new Vector2(-24, -16), TextAnchor.MiddleLeft);
-        var ifImg = Panel("IF", box.transform, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -156), new Vector2(-24, -82), new Color(0.96f, 0.97f, 0.99f, 1f));
-        renameInput = ifImg.gameObject.AddComponent<InputField>();
-        var txt = Label("Txt", ifImg.transform, "", 30, Vector2.zero, Vector2.one, new Vector2(14, 4), new Vector2(-14, -4), TextAnchor.MiddleLeft);
-        txt.color = new Color(0.1f, 0.1f, 0.13f);
-        txt.supportRichText = false;
-        var ph = Label("PH", ifImg.transform, "駅名を入力", 30, Vector2.zero, Vector2.one, new Vector2(14, 4), new Vector2(-14, -4), TextAnchor.MiddleLeft);
-        ph.color = new Color(0.45f, 0.45f, 0.5f);
-        renameInput.textComponent = txt;
-        renameInput.placeholder = ph;
-        renameInput.targetGraphic = ifImg;
-        renameInput.characterLimit = 12;
-        renameInput.lineType = InputField.LineType.SingleLine;
-        Btn("OK", box.transform, "決定", 28, new Vector2(0, 0), new Vector2(0.48f, 0), new Vector2(24, 24), new Vector2(0, 88), OnRenameOk, BtnActive);
-        Btn("Cancel", box.transform, "キャンセル", 26, new Vector2(0.52f, 0), new Vector2(1, 0), new Vector2(0, 24), new Vector2(-24, 88), () => renameModal.SetActive(false));
-        renameModal.SetActive(false);
-    }
-
-    // M2-D: 各番線のホーム縁(乗降モード)を一覧表示し、タップで循環させる最小限のUI。
-    // 番線ごとではなくホーム縁ごとに1行(3面2線なら4行)。スクロール実装は行わず、
-    // 最大想定件数(8線×2縁=16行程度)がそのまま収まる高さの固定パネルにする
     void BuildEdgeModal()
     {
-        var overlay = Panel("EdgeModal", transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero, new Color(0, 0, 0, 0.55f));
+        // セーフエリア内で全画面を覆い、Box本体はApplyResponsiveLayoutで
+        // 利用可能高に収める。横向きスマホでもタイトルと閉じるボタンを隠さない。
+        var overlay = Panel("EdgeModal", safeRoot, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero, new Color(0f, 0f, 0f, 0.68f));
         edgePanel = overlay.gameObject;
-        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
-        box.rectTransform.sizeDelta = new Vector2(600, 760);
-        Label("T", box.transform, "番線ごとの乗降設定", 28, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -56), new Vector2(-24, -16), TextAnchor.MiddleLeft);
-        Label("Hint", box.transform, "タップで 乗降可→乗車専用→降車専用→使用停止 の順に切替", 18, new Vector2(0, 1), new Vector2(1, 1), new Vector2(24, -84), new Vector2(-24, -60), TextAnchor.MiddleLeft);
-        var rowsGo = new GameObject("Rows");
-        rowsGo.transform.SetParent(box.transform, false);
-        edgeRows = rowsGo.AddComponent<RectTransform>();
-        edgeRows.anchorMin = new Vector2(0, 0);
-        edgeRows.anchorMax = new Vector2(1, 1);
-        edgeRows.offsetMin = new Vector2(16, 70);
-        edgeRows.offsetMax = new Vector2(-16, -92);
-        Btn("Close", box.transform, "閉じる", 26, new Vector2(0.3f, 0), new Vector2(0.7f, 0), new Vector2(0, 14), new Vector2(0, 62), () => edgePanel.SetActive(false));
+        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
+        edgeBoxRt = box.rectTransform;
+        edgeBoxRt.sizeDelta = new Vector2(700f, 920f);
+        Label("Title", box.transform, "番線ごとの乗降設定", 29,
+            new Vector2(0f, 1f), Vector2.one, new Vector2(24f, -62f),
+            new Vector2(-24f, -14f), TextAnchor.MiddleLeft);
+        var hint = Label("Hint", box.transform,
+            "ボタンをタップして、乗降可・乗車専用・降車専用・使用停止を切り替えます。",
+            18, new Vector2(0f, 1f), Vector2.one, new Vector2(24f, -112f),
+            new Vector2(-24f, -66f), TextAnchor.MiddleLeft);
+        hint.color = MutedTxt;
+        edgeRows = ScrollColumn("EdgeScroll", box.transform,
+            new Vector2(18f, 84f), new Vector2(-18f, -124f), out _);
+        Btn("Close", box.transform, "閉じる", 24, new Vector2(0.28f, 0f),
+            new Vector2(0.72f, 0f), new Vector2(0f, 16f),
+            new Vector2(0f, 70f), () => edgePanel.SetActive(false));
         edgePanel.SetActive(false);
     }
 
@@ -660,149 +1177,317 @@ public class UIController : MonoBehaviour
         RefreshEdgeModal();
     }
 
-    static string EdgeModeLabel(StationLayout.PlatformEdgeMode m) => m switch
+    static string EdgeModeLabel(StationLayout.PlatformEdgeMode mode)
     {
-        StationLayout.PlatformEdgeMode.Normal => "乗降可",
-        StationLayout.PlatformEdgeMode.BoardOnly => "乗車専用",
-        StationLayout.PlatformEdgeMode.AlightOnly => "降車専用",
-        StationLayout.PlatformEdgeMode.Disabled => "使用停止",
-        _ => "?",
-    };
+        switch (mode)
+        {
+            case StationLayout.PlatformEdgeMode.Normal: return "乗降可";
+            case StationLayout.PlatformEdgeMode.BoardOnly: return "乗車専用";
+            case StationLayout.PlatformEdgeMode.AlightOnly: return "降車専用";
+            case StationLayout.PlatformEdgeMode.Disabled: return "使用停止";
+            default: return "?";
+        }
+    }
 
     void RefreshEdgeModal()
     {
-        for (int i = edgeRows.childCount - 1; i >= 0; i--) Destroy(edgeRows.GetChild(i).gameObject);
+        for (int i = edgeRows.childCount - 1; i >= 0; i--)
+            Destroy(edgeRows.GetChild(i).gameObject);
         if (infoStation == null) return;
-        var st = infoStation;
-        var edges = st.PlatformEdges;
-        float rowH = 56, y = 0;
-        for (int i = 0; i < edges.Count; i++)
+        int index = 0;
+        foreach (var edge in infoStation.PlatformEdges)
         {
-            var e = edges[i];
-            int pf = st.PlatformNumberOf(e.trackIndex);
-            string title = pf + "番線 - " + (e.platformIndex + 1) + "番ホーム";
-            var rowTop = y;
-            var rowBottom = y - rowH;
-            Label("L" + i, edgeRows, title, 20, new Vector2(0, 1), new Vector2(0.55f, 1),
-                new Vector2(0, rowBottom + 4), new Vector2(0, rowTop), TextAnchor.MiddleLeft);
-            int trackIndex = e.trackIndex, side = e.side; // クロージャ用にローカルへ複写
-            Btn("M" + i, edgeRows, EdgeModeLabel(e.mode), 19, new Vector2(0.57f, 1), new Vector2(1, 1),
-                new Vector2(0, rowBottom + 4), new Vector2(0, rowTop),
-                () => CycleEdgeMode(trackIndex, side), new Color(0.26f, 0.42f, 0.5f, 0.95f));
-            y -= rowH + 6;
+            int trackIndex = edge.trackIndex;
+            int side = edge.side;
+            var row = FlowRow("Edge" + index++, edgeRows, 58f);
+            int platform = infoStation.PlatformNumberOf(edge.trackIndex);
+            FlowLabel("Name", row, platform + "番線／" + (edge.platformIndex + 1) + "番ホーム",
+                19, 58f);
+            FlowButton("Mode", row, EdgeModeLabel(edge.mode), 19, 58f,
+                () => CycleEdgeMode(trackIndex, side), BtnBlue, 170f, 0f);
         }
+        Canvas.ForceUpdateCanvases();
     }
 
     void CycleEdgeMode(int trackIndex, int side)
     {
         if (infoStation == null) return;
-        var st = infoStation;
-        StationLayout.PlatformEdgeMode found = StationLayout.PlatformEdgeMode.Normal;
-        foreach (var e in st.PlatformEdges)
-            if (e.trackIndex == trackIndex && e.side == side) { found = e.mode; break; }
-        var next = (StationLayout.PlatformEdgeMode)(((int)found + 1) % 4);
-        st.SetPlatformEdgeMode(trackIndex, side, next);
-        RefreshEdgeModal();
+        var current = StationLayout.PlatformEdgeMode.Normal;
+        foreach (var edge in infoStation.PlatformEdges)
+            if (edge.trackIndex == trackIndex && edge.side == side)
+            {
+                current = edge.mode;
+                break;
+            }
+        var next = (StationLayout.PlatformEdgeMode)(((int)current + 1) % 4);
+        infoStation.SetPlatformEdgeMode(trackIndex, side, next);
         SaveLoad.Save();
+        RefreshEdgeModal();
     }
 
-    void OnRebuildTap()
+    void BuildSettingsModal()
     {
-        if (infoStation != null) BC.BeginRebuild(infoStation);
+        var overlay = Panel("SettingsModal", transform, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero, new Color(0f, 0f, 0f, 0.68f));
+        settingsPanel = overlay.gameObject;
+        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
+        box.rectTransform.sizeDelta = new Vector2(650f, 430f);
+        Label("Title", box.transform, "設定", 31, new Vector2(0f, 1f), Vector2.one,
+            new Vector2(24f, -68f), new Vector2(-24f, -16f), TextAnchor.MiddleLeft);
+        var help = Label("Help", box.transform,
+            "操作\n地図移動：ドラッグ　拡大縮小：ピンチ／ホイール／±\n画面回転：右側の「回転」　全駅表示：「全体」",
+            21, new Vector2(0f, 1f), Vector2.one, new Vector2(24f, -202f),
+            new Vector2(-24f, -82f), TextAnchor.UpperLeft);
+        help.color = MutedTxt;
+        Btn("Reset", box.transform, "すべてのセーブデータを初期化", 23,
+            new Vector2(0.06f, 0f), new Vector2(0.94f, 0f),
+            new Vector2(0f, 114f), new Vector2(0f, 176f), ConfirmReset, Danger);
+        Btn("Close", box.transform, "閉じる", 24, new Vector2(0.28f, 0f),
+            new Vector2(0.72f, 0f), new Vector2(0f, 28f),
+            new Vector2(0f, 88f), () => settingsPanel.SetActive(false));
+        settingsPanel.SetActive(false);
     }
 
-    void OnRemoveTap()
+    void ConfirmReset()
     {
-        if (infoStation == null) return;
-        if (Time.unscaledTime < removeArmedUntil)
-        {
-            var st = infoStation;
-            HideStationInfo();
-            BC.RemoveStation(st);
-            return;
-        }
-        removeArmedUntil = Time.unscaledTime + 3.5f;
-        Toast(infoStation.stationName + "を撤去しますか?接続線路と通過列車も消えます。もう一度「撤去」で確定");
+        settingsPanel.SetActive(false);
+        ShowConfirm("最初からやり直しますか？",
+            "駅・線路・系統・列車・資金を含む、すべてのセーブデータを削除します。\n" +
+            "この操作は取り消せません。",
+            SaveLoad.ResetAll);
     }
+
+    void BuildConfirmModal()
+    {
+        var overlay = Panel("ConfirmModal", transform, Vector2.zero, Vector2.one,
+            Vector2.zero, Vector2.zero, new Color(0f, 0f, 0f, 0.72f));
+        confirmModal = overlay.gameObject;
+        var box = Panel("Box", overlay.transform, new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f), Vector2.zero, Vector2.zero, PanelBg);
+        box.rectTransform.sizeDelta = new Vector2(680f, 420f);
+        confirmTitle = Label("Title", box.transform, "", 30, new Vector2(0f, 1f),
+            Vector2.one, new Vector2(26f, -72f), new Vector2(-26f, -16f),
+            TextAnchor.MiddleLeft);
+        confirmBody = Label("Body", box.transform, "", 22, new Vector2(0f, 1f),
+            Vector2.one, new Vector2(26f, -238f), new Vector2(-26f, -88f),
+            TextAnchor.UpperLeft);
+        confirmBody.color = MutedTxt;
+        Btn("Cancel", box.transform, "キャンセル", 24, new Vector2(0f, 0f),
+            new Vector2(0.49f, 0f), new Vector2(26f, 28f),
+            new Vector2(-5f, 98f), CloseConfirm);
+        Btn("Confirm", box.transform, "実行する", 25, new Vector2(0.51f, 0f),
+            Vector2.one, new Vector2(5f, 28f), new Vector2(-26f, 98f),
+            RunConfirm, Danger);
+        confirmModal.SetActive(false);
+    }
+
+    void ShowConfirm(string title, string body, Action action)
+    {
+        confirmTitle.text = title;
+        confirmBody.text = body;
+        pendingConfirm = action;
+        confirmModal.SetActive(true);
+    }
+
+    void CloseConfirm()
+    {
+        pendingConfirm = null;
+        confirmModal.SetActive(false);
+    }
+
+    void RunConfirm()
+    {
+        var action = pendingConfirm;
+        pendingConfirm = null;
+        confirmModal.SetActive(false);
+        if (action != null) action();
+    }
+
+    // ---- トースト / 戻る ----
 
     void BuildToast()
     {
-        var p = Panel("Toast", transform, new Vector2(0.05f, 0), new Vector2(0.95f, 0), new Vector2(0, 104), new Vector2(0, 168), new Color(0, 0, 0, 0.65f));
-        toastBg = p.gameObject;
-        toastText = Label("T", p.transform, "", 28, Vector2.zero, Vector2.one, new Vector2(12, 4), new Vector2(-12, -4), TextAnchor.MiddleCenter);
+        var panel = Panel("Toast", safeRoot, new Vector2(0.05f, 0f),
+            new Vector2(0.95f, 0f), Vector2.zero, Vector2.zero,
+            new Color(0.02f, 0.03f, 0.05f, 0.92f));
+        // トーストは通知専用。起動直後は次アクション案内と重なるため、表示中でも
+        // 下にある建設ボタンや地図操作へ必ず入力を通す。
+        panel.raycastTarget = false;
+        var canvasGroup = panel.gameObject.AddComponent<CanvasGroup>();
+        canvasGroup.interactable = false;
+        canvasGroup.blocksRaycasts = false;
+        toastBg = panel.gameObject;
+        toastRt = panel.rectTransform;
+        toastText = Label("Text", panel.transform, "", 24, Vector2.zero, Vector2.one,
+            new Vector2(14f, 6f), new Vector2(-14f, -6f), TextAnchor.MiddleCenter);
+        toastText.raycastTarget = false;
         toastBg.SetActive(false);
     }
 
-    public static void Toast(string msg)
+    public static void Toast(string message)
     {
-        if (I == null) { Debug.Log("Toast: " + msg); return; }
-        I.toastText.text = msg;
+        if (I == null)
+        {
+            Debug.Log("Toast: " + message);
+            return;
+        }
+        I.toastText.text = message;
         I.toastBg.SetActive(true);
-        I.toastUntil = Time.unscaledTime + 4.5f;
+        I.toastUntil = Time.unscaledTime + 4.8f;
     }
 
-    public void ShowStationInfo(Station st)
+    void HandleBack()
     {
-        infoStation = st;
-        removeArmedUntil = 0;
-        infoPanel.SetActive(true);
-        infoText.text = st.stationName + "  (" + st.cars + "両対応・" + st.faces + "面" + st.lines + "線)\n"
-            + "待ち客: " + st.TotalWaiting + "人 / 上限" + st.WaitingCap + "\n"
-            + "発展レベル: " + st.DevLevel + "\n"
-            + "接続駅: " + TrackNetwork.Reachable(st).Count + "駅";
+        if (confirmModal.activeSelf) { CloseConfirm(); return; }
+        if (edgePanel.activeSelf) { edgePanel.SetActive(false); return; }
+        if (renameModal.activeSelf) { renameModal.SetActive(false); return; }
+        if (settingsPanel.activeSelf) { settingsPanel.SetActive(false); return; }
+        if (infoPanel.activeSelf) { HideStationInfo(); return; }
+        if (rig != null && rig.cabTrain != null)
+        {
+            BC.SetMode(BuildController.Mode.View);
+            return;
+        }
+        if (BC.mode == BuildController.Mode.Train &&
+            BC.trainSub == BuildController.TrainSub.CreateLine)
+        {
+            BC.CancelCreateLine();
+            return;
+        }
+        if (BC.mode != BuildController.Mode.View) BC.SetMode(BuildController.Mode.View);
     }
 
-    public void HideStationInfo()
-    {
-        infoStation = null;
-        infoPanel.SetActive(false);
-    }
+    // ---- モード / レスポンシブ配置 ----
 
     public void OnModeChanged()
     {
+        if (BC == null) return;
         if (rig != null) rig.ExitCab();
         if (cabBtn != null) cabBtn.color = BtnBg;
-        var mode = BC.mode;
-        foreach (var kv in modeBtns) kv.Value.color = kv.Key == mode ? BtnActive : BtnBg;
-        trackPanel.SetActive(mode == BuildController.Mode.Track);
-        stationPanel.SetActive(mode == BuildController.Mode.Station);
-        trainPanel.SetActive(mode == BuildController.Mode.Train);
-        if (mode == BuildController.Mode.Track) RefreshTrackBedButtons();
-        if (mode == BuildController.Mode.Train) RefreshTrainPanel();
-        if (mode != BuildController.Mode.View) HideStationInfo();
-        UpdateRouteLabel();
+        foreach (var kv in modeBtns)
+            kv.Value.color = kv.Key == BC.mode ? BtnActive : BtnBg;
+        trackPanel.SetActive(BC.mode == BuildController.Mode.Track);
+        stationPanel.SetActive(BC.mode == BuildController.Mode.Station);
+        trainPanel.SetActive(BC.mode == BuildController.Mode.Train);
+        if (BC.mode == BuildController.Mode.Track)
+        {
+            RefreshTrackBedButtons();
+            RefreshTrackSelection();
+        }
+        if (BC.mode == BuildController.Mode.Station) RefreshStationPanel();
+        if (BC.mode == BuildController.Mode.Train) RefreshTrainPanel();
+        if (BC.mode != BuildController.Mode.View) HideStationInfo();
+        RefreshOnboarding();
+        ApplyResponsiveLayout();
+    }
+
+    void ApplyResponsiveLayout()
+    {
+        if (safeRoot == null || Screen.width <= 0 || Screen.height <= 0) return;
+        var safe = Screen.safeArea;
+        safeRoot.anchorMin = new Vector2(safe.xMin / Screen.width, safe.yMin / Screen.height);
+        safeRoot.anchorMax = new Vector2(safe.xMax / Screen.width, safe.yMax / Screen.height);
+        safeRoot.offsetMin = Vector2.zero;
+        safeRoot.offsetMax = Vector2.zero;
+        Canvas.ForceUpdateCanvases();
+
+        if (edgeBoxRt != null && safeRoot.rect.width > 0f && safeRoot.rect.height > 0f)
+        {
+            const float modalMargin = 32f;
+            edgeBoxRt.sizeDelta = new Vector2(
+                Mathf.Min(700f, Mathf.Max(0f, safeRoot.rect.width - modalMargin)),
+                Mathf.Min(920f, Mathf.Max(0f, safeRoot.rect.height - modalMargin)));
+        }
+
+        bool portrait = IsPortrait;
+        float top = portrait ? PortraitTopHeight : LandscapeTopHeight;
+        float bottom = portrait ? PortraitToolbarHeight : LandscapeToolbarHeight;
+        SetBar(topBarRt, true, top);
+        SetBar(toolbarRt, false, bottom);
+        SetSheet(trackPanelRt, portrait, 330f, 410f, false, top, bottom);
+        SetSheet(stationPanelRt, portrait, 760f, 430f, false, top, bottom);
+        SetSheet(trainPanelRt, portrait, 1110f, 490f, true, top, bottom);
+        SetSheet(infoPanelRt, portrait, 570f, 520f, true, top, bottom);
+
+        toastRt.anchorMin = new Vector2(0.05f, 0f);
+        toastRt.anchorMax = new Vector2(0.95f, 0f);
+        toastRt.pivot = new Vector2(0.5f, 0f);
+        toastRt.anchoredPosition = new Vector2(0f, bottom + 10f);
+        toastRt.sizeDelta = new Vector2(0f, 82f);
+
+        onboardingRt.anchorMin = new Vector2(0.06f, 0f);
+        onboardingRt.anchorMax = new Vector2(0.94f, 0f);
+        onboardingRt.pivot = new Vector2(0.5f, 0f);
+        onboardingRt.anchoredPosition = new Vector2(0f, bottom + 12f);
+        onboardingRt.sizeDelta = new Vector2(0f, 220f);
+
+        bool placeLeft = !portrait && (BC != null && BC.mode == BuildController.Mode.Train ||
+            infoPanel != null && infoPanel.activeSelf);
+        cameraToolsRt.anchorMin = cameraToolsRt.anchorMax =
+            new Vector2(placeLeft ? 0f : 1f, 0.5f);
+        cameraToolsRt.pivot = new Vector2(placeLeft ? 0f : 1f, 0.5f);
+        cameraToolsRt.sizeDelta = new Vector2(88f, 350f);
+        cameraToolsRt.anchoredPosition = new Vector2(placeLeft ? 10f : -10f,
+            (bottom - top) * 0.18f);
+
+        lastScreenSize = new Vector2Int(Screen.width, Screen.height);
+        lastSafeArea = safe;
+    }
+
+    static void SetBar(RectTransform rt, bool top, float height)
+    {
+        rt.anchorMin = new Vector2(0f, top ? 1f : 0f);
+        rt.anchorMax = new Vector2(1f, top ? 1f : 0f);
+        rt.pivot = new Vector2(0.5f, top ? 1f : 0f);
+        rt.anchoredPosition = new Vector2(0f, top ? -6f : 6f);
+        rt.sizeDelta = new Vector2(-12f, height - 6f);
+    }
+
+    static void SetSheet(RectTransform rt, bool portrait, float portraitHeight,
+        float landscapeWidth, bool right, float top, float bottom)
+    {
+        if (portrait)
+        {
+            rt.anchorMin = new Vector2(0f, 0f);
+            rt.anchorMax = new Vector2(1f, 0f);
+            rt.pivot = new Vector2(0.5f, 0f);
+            rt.anchoredPosition = new Vector2(0f, bottom + 10f);
+            rt.sizeDelta = new Vector2(-20f, portraitHeight);
+        }
+        else
+        {
+            float x = right ? 1f : 0f;
+            rt.anchorMin = new Vector2(x, 0f);
+            rt.anchorMax = new Vector2(x, 1f);
+            rt.pivot = new Vector2(x, 0.5f);
+            rt.anchoredPosition = new Vector2(right ? -10f : 10f, (bottom - top) * 0.5f);
+            rt.sizeDelta = new Vector2(landscapeWidth, -(top + bottom + 20f));
+        }
     }
 
     void Update()
     {
-        moneyText.text = "資金 " + GameState.MoneyLabel;
+        if (Input.GetKeyDown(KeyCode.Escape)) HandleBack();
+        if (lastScreenSize.x != Screen.width || lastScreenSize.y != Screen.height ||
+            lastSafeArea != Screen.safeArea)
+            ApplyResponsiveLayout();
+
+        moneyText.text = "資金　" + GameState.MoneyLabel;
         clockText.text = rig != null && rig.cabTrain != null
-            ? GameState.ClockLabel + "  " + rig.cabTrain.SpeedKmh.ToString("F0") + "km/h"
+            ? GameState.ClockLabel + "　" + rig.cabTrain.SpeedKmh.ToString("F0") + "km/h"
             : GameState.ClockLabel;
-        carriedText.text = "輸送人員 " + GameState.carried + "人";
-        if (stationPanel.activeSelf)
-        {
-            carsVal.text = BC.pCars + "両";
-            facesVal.text = BC.pFaces + "面";
-            linesVal.text = BC.pLines + "線";
-            double newCost = GameState.StationCost(BC.pCars, BC.pFaces, BC.pLines);
-            var rt = BC.rebuildTarget;
-            if (rt != null)
-            {
-                stationTitle.text = "駅を建て替え";
-                confirmBtnLabel.text = "建て替え確定";
-                double delta = newCost - GameState.StationCost(rt.cars, rt.faces, rt.lines);
-                costText.text = delta > 0 ? "追加費用 " + (delta / 1e8).ToString("F1") + "億円"
-                    : delta < 0 ? "払戻 " + (-delta * 0.5 / 1e8).ToString("F1") + "億円"
-                    : "費用なし";
-            }
-            else
-            {
-                stationTitle.text = "駅を建設";
-                confirmBtnLabel.text = "ここに建設";
-                costText.text = "建設費 " + (newCost / 1e8).ToString("F1") + "億円";
-            }
-        }
+        carriedText.text = "輸送　" + GameState.carried + "人";
+        if (stationPanel.activeSelf) RefreshStationPanel();
         if (toastBg.activeSelf && Time.unscaledTime > toastUntil) toastBg.SetActive(false);
+
+        if (Time.unscaledTime >= nextSlowRefresh)
+        {
+            nextSlowRefresh = Time.unscaledTime + 0.25f;
+            RefreshSpeedButtons();
+            RefreshTrackSelection();
+            RefreshInfoText();
+            RefreshOnboarding();
+        }
     }
 }

@@ -83,6 +83,7 @@ public class Station : MonoBehaviour
         var platformSurface = new RailKit.MeshData();
         var platformEdge = new RailKit.MeshData();
         var tactile = new RailKit.MeshData();
+        var warningLine = new RailKit.MeshData();
         var drain = new RailKit.MeshData();
         var canopyRoof = new RailKit.MeshData();
         var metalwork = new RailKit.MeshData();
@@ -93,24 +94,37 @@ public class Station : MonoBehaviour
         for (int pi = 0; pi < layout.platforms.Count; pi++)
         {
             var p = layout.platforms[pi];
-            float visualW = Mathf.Max(2.6f, p.y - 1.2f);
+            // layout上のホーム境界をそのまま描画境界にする。旧描画は左右を各0.6m
+            // 縮めていたため、レイアウト計算よりさらに1.2m広い隙間を生んでいた。
+            float visualW = Mathf.Max(2.6f, p.y - 0.02f);
+            const float surfaceThick = 0.10f;
+            float baseTop = RailDimensions.PlatformTop - surfaceThick;
 
             // コンクリート躯体の上に薄い舗装層を重ね、ホーム縁だけ白い笠石を見せる。
-            RailKit.AddBox(platformBase, new Vector3(p.x, 0.52f, 0),
-                new Vector3(visualW, 1.04f, platLen), Quaternion.identity);
-            RailKit.AddBox(platformSurface, new Vector3(p.x, 1.075f, 0),
-                new Vector3(visualW - 0.16f, 0.11f, platLen - 0.35f), Quaternion.identity);
+            RailKit.AddBox(platformBase, new Vector3(p.x, baseTop * 0.5f, 0),
+                new Vector3(visualW, baseTop, platLen), Quaternion.identity);
+            RailKit.AddBox(platformSurface,
+                new Vector3(p.x, RailDimensions.PlatformTop - surfaceThick * 0.5f, 0),
+                new Vector3(visualW - 0.04f, surfaceThick, platLen - 0.35f),
+                Quaternion.identity);
 
             foreach (var e in layout.edges)
             {
                 if (e.platformIndex != pi) continue;
                 float edgeX = p.x - e.side * visualW * 0.5f;
-                // 線路側から順に、白い縁石→黄色い点字ブロック→細い排水帯。
-                RailKit.AddBox(platformEdge, new Vector3(edgeX + e.side * 0.12f, 1.12f, 0),
-                    new Vector3(0.34f, 0.16f, platLen - 0.25f), Quaternion.identity);
-                RailKit.AddBox(tactile, new Vector3(edgeX + e.side * 0.72f, 1.155f, 0),
+                // 線路側から順に、白い笠石→京王線のオレンジ警戒線→内方線付き
+                // 点状ブロック→排水帯。いずれも線路側へは張り出させない。
+                RailKit.AddBox(platformEdge,
+                    new Vector3(edgeX + e.side * 0.14f, RailDimensions.PlatformTop - 0.08f, 0),
+                    new Vector3(0.28f, 0.16f, platLen - 0.25f), Quaternion.identity);
+                RailKit.AddBox(warningLine,
+                    new Vector3(edgeX + e.side * 0.39f, RailDimensions.PlatformTop + 0.012f, 0),
+                    new Vector3(0.09f, 0.024f, platLen - 0.55f), Quaternion.identity);
+                RailKit.AddBox(tactile,
+                    new Vector3(edgeX + e.side * 0.75f, RailDimensions.PlatformTop + 0.018f, 0),
                     new Vector3(0.48f, 0.055f, platLen - 1.0f), Quaternion.identity);
-                RailKit.AddBox(drain, new Vector3(edgeX + e.side * 1.12f, 1.145f, 0),
+                RailKit.AddBox(drain,
+                    new Vector3(edgeX + e.side * 1.12f, RailDimensions.PlatformTop + 0.012f, 0),
                     new Vector3(0.12f, 0.045f, platLen - 1.2f), Quaternion.identity);
             }
 
@@ -120,7 +134,8 @@ public class Station : MonoBehaviour
             const float roofAngle = 7f;
             float halfRoofW = roofW * 0.5f;
             float rise = halfRoofW * Mathf.Tan(roofAngle * Mathf.Deg2Rad);
-            float roofY = 4.12f + rise * 0.5f;
+            float beamY = RailDimensions.PlatformTop + 2.68f;
+            float roofY = beamY + 0.10f + rise * 0.5f;
             RailKit.AddBox(canopyRoof, new Vector3(p.x - roofW * 0.25f, roofY, 0),
                 new Vector3(halfRoofW + 0.18f, 0.18f, coveredLen),
                 Quaternion.Euler(0, 0, roofAngle));
@@ -132,11 +147,13 @@ public class Station : MonoBehaviour
             float postMax = coveredLen * 0.5f - 3f;
             for (float z = postMin; z <= postMax + 0.01f; z += 18f)
             {
-                RailKit.AddBox(metalwork, new Vector3(p.x, 2.58f, z),
-                    new Vector3(0.22f, 2.95f, 0.22f), Quaternion.identity);
-                RailKit.AddBox(metalwork, new Vector3(p.x, 4.02f, z),
+                RailKit.AddBox(metalwork,
+                    new Vector3(p.x, (RailDimensions.PlatformTop + beamY) * 0.5f, z),
+                    new Vector3(0.22f, beamY - RailDimensions.PlatformTop, 0.22f),
+                    Quaternion.identity);
+                RailKit.AddBox(metalwork, new Vector3(p.x, beamY, z),
                     new Vector3(roofW - 0.35f, 0.16f, 0.24f), Quaternion.identity);
-                RailKit.AddBox(lighting, new Vector3(p.x, 3.9f, z + 4.5f),
+                RailKit.AddBox(lighting, new Vector3(p.x, beamY - 0.16f, z + 4.5f),
                     new Vector3(1.25f, 0.08f, 0.34f), Quaternion.identity);
             }
 
@@ -144,13 +161,17 @@ public class Station : MonoBehaviour
             float[] benchZ = { -platLen * 0.18f, platLen * 0.18f };
             foreach (float z in benchZ)
             {
-                RailKit.AddBox(furniture, new Vector3(p.x + 0.75f, 1.55f, z),
+                RailKit.AddBox(furniture,
+                    new Vector3(p.x + 0.75f, RailDimensions.PlatformTop + 0.40f, z),
                     new Vector3(0.62f, 0.14f, 3.2f), Quaternion.identity);
-                RailKit.AddBox(furniture, new Vector3(p.x + 1.02f, 1.92f, z),
+                RailKit.AddBox(furniture,
+                    new Vector3(p.x + 1.02f, RailDimensions.PlatformTop + 0.77f, z),
                     new Vector3(0.12f, 0.75f, 3.2f), Quaternion.identity);
-                RailKit.AddBox(metalwork, new Vector3(p.x + 0.75f, 1.32f, z - 1.1f),
+                RailKit.AddBox(metalwork,
+                    new Vector3(p.x + 0.75f, RailDimensions.PlatformTop + 0.17f, z - 1.1f),
                     new Vector3(0.12f, 0.48f, 0.12f), Quaternion.identity);
-                RailKit.AddBox(metalwork, new Vector3(p.x + 0.75f, 1.32f, z + 1.1f),
+                RailKit.AddBox(metalwork,
+                    new Vector3(p.x + 0.75f, RailDimensions.PlatformTop + 0.17f, z + 1.1f),
                     new Vector3(0.12f, 0.48f, 0.12f), Quaternion.identity);
             }
 
@@ -159,10 +180,13 @@ public class Station : MonoBehaviour
             {
                 float z = endSign * (platLen * 0.5f - 0.75f);
                 for (int railNo = 0; railNo < 2; railNo++)
-                    RailKit.AddBox(metalwork, new Vector3(p.x, 1.7f + railNo * 0.48f, z),
+                    RailKit.AddBox(metalwork,
+                        new Vector3(p.x, RailDimensions.PlatformTop + 0.52f + railNo * 0.48f, z),
                         new Vector3(visualW - 0.35f, 0.1f, 0.12f), Quaternion.identity);
                 for (int post = -1; post <= 1; post++)
-                    RailKit.AddBox(metalwork, new Vector3(p.x + post * (visualW * 0.42f), 1.78f, z),
+                    RailKit.AddBox(metalwork,
+                        new Vector3(p.x + post * (visualW * 0.42f),
+                            RailDimensions.PlatformTop + 0.61f, z),
                         new Vector3(0.12f, 1.25f, 0.12f), Quaternion.identity);
             }
 
@@ -171,10 +195,11 @@ public class Station : MonoBehaviour
             for (int si = 0; si < signCount; si++)
             {
                 float signZ = signCount == 1 ? 0 : (si == 0 ? -platLen * 0.23f : platLen * 0.23f);
-                RailKit.AddBox(signBoard, new Vector3(p.x, 2.95f, signZ),
+                float signY = RailDimensions.PlatformTop + 1.82f;
+                RailKit.AddBox(signBoard, new Vector3(p.x, signY, signZ),
                     new Vector3(0.14f, 0.92f, 3.8f), Quaternion.identity);
-                CreateStationSignText(pi, si, -1, new Vector3(p.x - 0.08f, 2.95f, signZ));
-                CreateStationSignText(pi, si, 1, new Vector3(p.x + 0.08f, 2.95f, signZ));
+                CreateStationSignText(pi, si, -1, new Vector3(p.x - 0.08f, signY, signZ));
+                CreateStationSignText(pi, si, 1, new Vector3(p.x + 0.08f, signY, signZ));
             }
         }
 
@@ -194,6 +219,8 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("PlatformSurface", platformSurface.ToMesh(), MatLib.Get("StationHouse"), transform);
         RailKit.MeshGO("PlatformEdge", platformEdge.ToMesh(), MatLib.Get("StationHouse"), transform);
         RailKit.MeshGO("TactilePaving", tactile.ToMesh(), MatLib.Get("SwitchBox"), transform);
+        RailKit.MeshGO("WarningLine", warningLine.ToMesh(),
+            MatLib.Tinted("TrainBase", new Color(0.95f, 0.35f, 0.05f)), transform);
         RailKit.MeshGO("Drainage", drain.ToMesh(), MatLib.Get("Switch"), transform);
         RailKit.MeshGO("CanopyRoof", canopyRoof.ToMesh(), MatLib.Get("Canopy"), transform);
         RailKit.MeshGO("Metalwork", metalwork.ToMesh(), MatLib.Get("Switch"), transform);
@@ -303,7 +330,9 @@ public class Station : MonoBehaviour
         var swBox = new RailKit.MeshData();
 
         for (int i = 0; i < layout.trackOffsets.Length; i++)
-            RailKit.AddTrack(ballast, rail, tie, RailKit.Chaikin(TrackVisualPath(i, conn[0], conn[1]), 2));
+            RailKit.AddTrack(ballast, rail, tie,
+                RailKit.Chaikin(TrackVisualPath(i, conn[0], conn[1]), 2),
+                TrackBedType.Ballast, null, RailDimensions.StationBedHalfWidth);
 
         bool hasL = false, hasR = false;
         foreach (int si in layout.stopTracks) { if (layout.trackOffsets[si] < 0) hasL = true; else hasR = true; }

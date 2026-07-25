@@ -2,6 +2,7 @@ using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 // 通常の起動経路(Bootstrap.Awake)を実行し、数フレーム進めても例外/エラーログが
 // 出ないことを確認するPlayModeスモークテスト。
@@ -55,8 +56,33 @@ public class BootstrapSmokeTest
 
         // 起動経路が組み立てるはずの主要オブジェクトが存在すること
         Assert.That(GameObject.Find("Main Camera"), Is.Not.Null, "CameraRigが生成されていること");
-        Assert.That(GameObject.Find("Canvas"), Is.Not.Null, "UIController.Buildが実行されていること");
+        var canvas = GameObject.Find("Canvas");
+        Assert.That(canvas, Is.Not.Null, "UIController.Buildが実行されていること");
         Assert.That(GameObject.Find("EventSystem"), Is.Not.Null);
         Assert.That(go.GetComponent<BuildController>(), Is.Not.Null, "BuildControllerがBootstrap自身に追加されていること");
+
+        Assert.That(canvas.transform.Find("SafeArea/TopBar/Settings"), Is.Not.Null,
+            "破壊操作は常設ボタンではなく設定画面へまとめること");
+        Assert.That(canvas.transform.Find("SafeArea/Toolbar/ModeStation"), Is.Not.Null);
+        Assert.That(canvas.transform.Find("SafeArea/CameraTools/Home"), Is.Not.Null,
+            "タッチ端末にも全体表示カメラ操作があること");
+        Assert.That(canvas.transform.Find("ConfirmModal"), Is.Not.Null,
+            "撤去・廃止・初期化に共通確認画面があること");
+        Assert.That(canvas.GetComponentsInChildren<ScrollRect>(true).Length,
+            Is.GreaterThanOrEqualTo(2), "長い系統一覧と番線設定がスクロール可能なこと");
+        Assert.That(UIController.MinimumPrimaryButtonHeight, Is.GreaterThanOrEqualTo(54f));
+
+        var toast = canvas.transform.Find("SafeArea/Toast");
+        Assert.That(toast, Is.Not.Null);
+        Assert.That(toast.GetComponent<CanvasGroup>().blocksRaycasts, Is.False,
+            "通知表示中も起動案内や地図の操作を遮らないこと");
+        foreach (var graphic in toast.GetComponentsInChildren<Graphic>(true))
+            Assert.That(graphic.raycastTarget, Is.False);
+
+        var safeArea = canvas.transform.Find("SafeArea").GetComponent<RectTransform>();
+        var edgeBox = safeArea.Find("EdgeModal/Box").GetComponent<RectTransform>();
+        Assert.That(edgeBox.rect.height, Is.LessThanOrEqualTo(safeArea.rect.height - 30f),
+            "番線設定の外枠を横向き端末でもセーフエリア内へ収めること");
+        Assert.That(edgeBox.rect.width, Is.LessThanOrEqualTo(safeArea.rect.width - 30f));
     }
 }
