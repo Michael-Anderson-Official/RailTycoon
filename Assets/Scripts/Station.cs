@@ -307,6 +307,11 @@ public class Station : MonoBehaviour
 
     // 線iの駅内経路(ローカル)。接続された端はスロート(収束→リード→駅端)まで伸ばし、
     // 未接続の端はホーム端で止める(頭端式)
+    // ホーム端の直前に置く押さえ点までの距離。Chaikin(2回)の角の丸めが影響する
+    // 範囲は隣接区間長のおよそ3/4なので、この長さを短くするほど収束の滲み出しが
+    // ホーム側へ届かなくなる
+    public const float PlatformEndHold = 3f;
+
     List<Vector3> TrackVisualPath(int i, bool cMinus, bool cPlus)
     {
         float off = layout.trackOffsets[i];
@@ -320,7 +325,14 @@ public class Station : MonoBehaviour
             pts.Add(new Vector3(end, 0, -cz));
             pts.Add(new Vector3((off + end) * 0.5f, 0, -mz));
         }
-        pts.Add(new Vector3(off, 0, -H));   // ホーム端
+        // ホーム端の直前に「押さえ」の点を入れる。この経路は最後にChaikinで平滑化
+        // されるが、ホーム区間は非常に長い(編成長ぶん)ため、押さえが無いとスロートの
+        // 収束がホーム区間まで遡って滲み出し、道床がホームへ食い込む
+        // (3線以上かつ端が接続されている駅で発生。4面8線では3.25mも食い込んでいた)。
+        // 端の直前に短い区間を作ることで、角の丸めをスロート側だけに閉じ込める
+        pts.Add(new Vector3(off, 0, -H));            // ホーム端
+        pts.Add(new Vector3(off, 0, -H + PlatformEndHold));
+        pts.Add(new Vector3(off, 0, H - PlatformEndHold));
         pts.Add(new Vector3(off, 0, H));
         if (cPlus)
         {

@@ -208,6 +208,74 @@ public class RailGeometryTests
         Assert.That(CrossedBy(a, b), Is.Null, "駅の向きが接続方向とズレていても誤検出しないこと");
     }
 
+    // ---- 駅構内の道床がホームへ食い込まないこと(実メッシュでの検証) ----
+    // 数値(StationLayout)だけの検証では取りこぼす。実際に生成されたメッシュの頂点で見る。
+    // **端を線路に接続していること**が必須: 未接続だとスロートの収束自体が起きず、
+    // この不具合は再現しない(以前の検証がこれを取りこぼしていた)
+
+    [TestCase(2, 2)]
+    [TestCase(2, 3)]
+    [TestCase(2, 4)]
+    [TestCase(3, 2)]
+    [TestCase(1, 2)]
+    [TestCase(4, 8)]
+    public void ConnectedStation_TrackBedDoesNotIntrudeIntoPlatform(int faces, int lines)
+    {
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, faces, lines, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 900), 0, 10, faces, lines, "B");
+        EditModeTestHelpers.Connect(a, b);
+        a.RebuildTrackVisual();
+
+        float platLen = a.cars * StationLayout.CarLength;
+        var tw = a.transform.Find("TrackWork");
+        Assert.That(tw, Is.Not.Null);
+
+        float worst = 0f;
+        foreach (var name in new[] { "Ballast", "Tie", "Rail" })
+        {
+            var t = tw.Find(name);
+            if (t == null) continue;
+            var mf = t.GetComponent<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) continue;
+            foreach (var v in mf.sharedMesh.vertices)
+            {
+                var lp = a.transform.InverseTransformPoint(t.TransformPoint(v));
+                if (Mathf.Abs(lp.z) > platLen * 0.5f) continue;   // ホーム本体の範囲だけ見る
+                foreach (var p in a.layout.platforms)
+                {
+                    float visualW = Mathf.Max(2.6f, p.y - 0.02f);
+                    worst = Mathf.Max(worst, visualW * 0.5f - Mathf.Abs(lp.x - p.x));
+                }
+            }
+        }
+        Assert.That(worst, Is.LessThanOrEqualTo(0.005f),
+            "駅構内の道床・枕木・レールがホーム躯体へ食い込まないこと(食い込み" + worst.ToString("F2") + "m)");
+    }
+
+    [Test]
+    public void TrainLegStaysOnTrackCentreThroughPlatform()
+    {
+        // レールを真っ直ぐに保っても、走行経路が同じように保たれていないと
+        // 列車だけ内側へ寄ってレールから外れて見える
+        var a = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 10, 2, 4, "A");
+        var b = EditModeTestHelpers.MakeStation(new Vector3(0, 0, 900), 0, 10, 2, 4, "B");
+        var seg = EditModeTestHelpers.Connect(a, b);
+
+        int track = a.layout.stopTracks[0];
+        float off = a.layout.trackOffsets[track];
+        var leg = Train.BuildLeg(a, track, seg.SignAt(a), b, b.layout.stopTracks[0], seg.SignAt(b), 100f);
+
+        float maxDev = 0f;
+        foreach (var p in leg)
+        {
+            var lp = a.transform.InverseTransformPoint(p);
+            if (Mathf.Abs(lp.z) > a.cars * StationLayout.CarLength * 0.5f) continue;
+            maxDev = Mathf.Max(maxDev, Mathf.Abs(lp.x - off));
+        }
+        Assert.That(maxDev, Is.LessThanOrEqualTo(0.02f),
+            "ホーム区間では走行経路が線路中心から外れないこと(ズレ" + maxDev.ToString("F2") + "m)");
+    }
+
     // ---- 駅を建てる位置の当たり判定 ----
     // 既存の駅や既設の線路へ重ねて建てられてしまうと、ホームや道床がめり込んで描画される
 

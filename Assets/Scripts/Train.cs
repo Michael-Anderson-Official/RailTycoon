@@ -710,6 +710,10 @@ public class Train : MonoBehaviour
         float conv = Mathf.Sign(st.layout.trackOffsets[track]) * 2.3f;
         if (includeTailMarker) pts.Add(st.TrackWorldPoint(track, -sign * halfTrain));
         pts.Add(st.TrackWorldPoint(track, 0));
+        // ホーム端の直前に押さえを入れ、Chaikinの角の丸めでスロートの収束が
+        // ホーム区間へ遡らないようにする(Station.TrackVisualPathと同じ理由・同じ距離。
+        // 揃えておかないと、レールは真っ直ぐなのに列車だけ内側へ寄って浮いて見える)
+        pts.Add(st.TrackWorldPoint(track, sign * (h - Station.PlatformEndHold)));
         pts.Add(st.TrackWorldPoint(track, sign * h));                                              // ホーム端
         pts.Add(st.transform.TransformPoint(new Vector3(conv, 0, sign * (h + tf - L))));           // 収束(自線側±2.3)
         if (Mathf.Abs(mainOffset - conv) > CrossoverMismatch)
@@ -728,6 +732,7 @@ public class Train : MonoBehaviour
             pts.Add(st.transform.TransformPoint(new Vector3(mainOffset, 0, sign * (h + tf - L * 0.5f)))); // 両渡り線で自線側へ
         pts.Add(st.transform.TransformPoint(new Vector3(conv, 0, sign * (h + tf - L))));           // 収束(自線側±2.3)
         pts.Add(st.TrackWorldPoint(track, sign * h));                                              // ホーム端
+        pts.Add(st.TrackWorldPoint(track, sign * (h - Station.PlatformEndHold)));                  // 押さえ(上記と同じ理由)
         pts.Add(st.TrackWorldPoint(track, 0));
         if (includeTailMarker) pts.Add(st.TrackWorldPoint(track, -sign * halfTrain));
         return pts;
