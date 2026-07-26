@@ -41,9 +41,13 @@ public static class TrainCab
     // モニター画面。縦画面は水平画角が約30°しかないので、助士側へ置くと映らない。
     // 実車の車側カメラのモニタと同じく**運転士の正面**、計器盤の右寄りに置く
     public const float MonitorX = -0.50f;
-    public const float MonitorY = DeskTopY + 0.17f;
-    public const float MonitorZ = FrontZ - 0.92f;
-    public const float MonitorW = 0.52f, MonitorH = 0.34f;
+    // 実車と同じくコンソールの上面に立てる。低く置くと縦画角(60°)の下端から
+    // 落ちて画面に映らない(2026-07-27にユーザーが実機で「モニター無い」と指摘)
+    // 実車のITVモニタ相当(20cm級)。目線から約0.9mなので、これ以上大きいと
+    // 画面幅いっぱいに広がって前方を塞ぐ
+    public const float MonitorY = DeskTopY + 0.30f;
+    public const float MonitorZ = FrontZ - 0.65f;
+    public const float MonitorW = 0.26f, MonitorH = 0.17f;
 
     public static Style StyleOf(TrainCatalog.TrainTypeDef t) => t.cabStyle;
 

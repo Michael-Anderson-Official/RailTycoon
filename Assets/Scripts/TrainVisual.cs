@@ -278,14 +278,20 @@ public static class TrainVisual
         var dark = new RailKit.MeshData();
         var q = Quaternion.Euler(sign * 12f, sign > 0 ? 0 : 180f, 0); // 前面をわずかに傾ける
         Vector3 c = new Vector3(0, 2.4f, z + sign * 0.15f);
-        // 前面パネル(車体色): 窓上・窓下
-        RailKit.AddBox(frame, c + new Vector3(0, 0.95f, 0), new Vector3(2.72f, 1.6f, 0.3f), q);
+        // 前面パネル(車体色)。**窓の範囲は開口にする**(窓越しの眺めにするため)。
+        // 窓(ガラス)は y∈[0.38, 1.58]、x∈[-1.13, 1.13]
+        // 窓は y∈[-0.35, 1.58]。運転士目線から前方の線路が見えるよう下へ深く取る
+        RailKit.AddBox(frame, c + new Vector3(0, 1.665f, 0), new Vector3(2.72f, 0.17f, 0.3f), q);   // 窓上
+        RailKit.AddBox(frame, c + new Vector3(0, -0.575f, 0), new Vector3(2.72f, 0.45f, 0.3f), q);  // 窓下
+        for (int px = -1; px <= 1; px += 2)
+            RailKit.AddBox(frame, c + new Vector3(px * 1.245f, 0.615f, 0),
+                new Vector3(0.23f, 1.93f, 0.3f), q);                                                 // 左右ピラー
         RailKit.AddBox(frame, c + new Vector3(0, -1.35f, 0), new Vector3(2.72f, 1.1f, 0.3f), q);
         // 屋根と前面をつなぐ上部の丸み
         RailKit.AddBox(frame, c + new Vector3(0, 1.7f, sign * -0.12f), new Vector3(2.45f, 0.5f, 0.3f),
             q * Quaternion.Euler(sign * 22f, 0, 0));
         // 運転席ガラス
-        RailKit.AddBox(glass, c + new Vector3(0, 0.98f, sign * 0.06f), new Vector3(2.26f, 1.2f, 0.12f), q);
+        RailKit.AddBox(glass, c + new Vector3(0, 0.615f, sign * 0.06f), new Vector3(2.26f, 1.93f, 0.12f), q);
         // 前照灯・尾灯
         for (int side = -1; side <= 1; side += 2)
             RailKit.AddBox(lite, c + new Vector3(0.88f * side, -0.5f, sign * 0.13f),
@@ -313,15 +319,23 @@ public static class TrainVisual
         var q = Quaternion.Euler(sign * 18f, sign > 0 ? 0 : 180f, 0);   // 大きく前傾
         var c = new Vector3(0, 2.4f, z + sign * 0.18f);
 
-        // 黒い前面パネル(窓上・窓下・上部丸み)
-        RailKit.AddBox(black, c + q * new Vector3(0, 1.05f, 0), new Vector3(2.74f, 1.55f, 0.3f), q);
+        // 黒い前面パネル。**窓の範囲は開口にする**(運転士目線で窓越しの眺めにするため)。
+        // 以前は窓の上にガラス板を重ねるだけで開口が無く、車内から前が見えなかった。
+        // 窓(ガラス)はローカルで x∈[-1.2, 0.5]、y∈[0.4, 1.6]
+        // 窓は y∈[-0.35, 1.6](運転士目線から前方の線路が見えるよう下へ深く取る)。
+        // 窓下は下部パネルの上端(-0.675)まで塞ぐ。ここは元から隙間が空いていて
+        // 車内から外が見えていた(前面パネルに隠れて外からは分からなかった)
+        RailKit.AddBox(black, c + q * new Vector3(0, 1.7125f, 0), new Vector3(2.74f, 0.225f, 0.3f), q);
+        RailKit.AddBox(black, c + q * new Vector3(0, -0.5125f, 0), new Vector3(2.74f, 0.325f, 0.3f), q);
+        RailKit.AddBox(black, c + q * new Vector3(-1.285f, 0.625f, 0), new Vector3(0.17f, 1.95f, 0.3f), q);
+        RailKit.AddBox(black, c + q * new Vector3(0.935f, 0.625f, 0), new Vector3(0.87f, 1.95f, 0.3f), q);
         RailKit.AddBox(black, c + q * new Vector3(0, -1.25f, 0), new Vector3(2.74f, 1.15f, 0.3f), q);
         RailKit.AddBox(black, c + q * new Vector3(0, 1.78f, -0.14f), new Vector3(2.5f, 0.5f, 0.3f), q * Quaternion.Euler(sign * 22f, 0, 0));
         // 窓上=京王レッド帯 / 窓下=京王ブルー帯(前面に回り込む)
         RailKit.AddBox(red, c + q * new Vector3(0, 1.92f, 0.02f), new Vector3(2.74f, 0.16f, 0.32f), q);
-        RailKit.AddBox(blue, c + q * new Vector3(0, -0.05f, 0.02f), new Vector3(2.74f, 0.24f, 0.32f), q);
+        RailKit.AddBox(blue, c + q * new Vector3(0, -0.52f, 0.02f), new Vector3(2.74f, 0.3f, 0.32f), q);
         // 運転席ガラス(**運転席は左**=日本の一般。貫通扉が右なので中央よりやや左寄り)
-        RailKit.AddBox(glass, c + q * new Vector3(-0.35f, 1.0f, 0.06f), new Vector3(1.7f, 1.2f, 0.12f), q);
+        RailKit.AddBox(glass, c + q * new Vector3(-0.35f, 0.625f, 0.06f), new Vector3(1.7f, 1.95f, 0.12f), q);
         // 前面貫通扉(右側、黒。窓付き)
         RailKit.AddBox(black, c + q * new Vector3(0.95f, 0.55f, 0.03f), new Vector3(0.75f, 2.9f, 0.28f), q);
         RailKit.AddBox(glass, c + q * new Vector3(0.95f, 1.3f, 0.08f), new Vector3(0.58f, 0.7f, 0.1f), q);

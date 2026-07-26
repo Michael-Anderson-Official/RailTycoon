@@ -116,19 +116,21 @@ public class CabViewTests
     }
 
     [Test]
-    public void FrontFace_IsHiddenOnlyWhileRidingTheCab()
+    public void Windscreen_IsRemovedButTheFrameStaysWhileRidingTheCab()
     {
-        // 前面は開口が無いので、車窓の間だけ隠して前が見えるようにしている
+        // 「窓越し」にするため、外すのはガラスだけ。枠(Face)は残す
         var train = Make(0, out _, out _);
         Transform body = null;
         foreach (Transform car in train.transform) if (car.name == "Car0") { body = car; break; }
-        var face = body.Find("Face").GetComponent<MeshRenderer>();
+        var frame = body.Find("Face").GetComponent<MeshRenderer>();
+        var glass = body.Find("FaceGlass").GetComponent<MeshRenderer>();
 
-        Assert.That(face.enabled, Is.True, "既定では前面が見えていること");
-        train.SetFrontFaceVisible(false);
-        Assert.That(face.enabled, Is.False, "車窓中は隠すこと");
-        train.SetFrontFaceVisible(true);
-        Assert.That(face.enabled, Is.True, "車窓を抜けたら戻すこと");
+        Assert.That(glass.enabled, Is.True, "既定ではガラスが見えていること");
+        train.SetWindscreenVisible(false);
+        Assert.That(glass.enabled, Is.False, "車窓中はガラスを外すこと");
+        Assert.That(frame.enabled, Is.True, "枠は残すこと(窓越しに見えるように)");
+        train.SetWindscreenVisible(true);
+        Assert.That(glass.enabled, Is.True, "車窓を抜けたら戻すこと");
     }
 
     // ---- ドアの開閉 ----

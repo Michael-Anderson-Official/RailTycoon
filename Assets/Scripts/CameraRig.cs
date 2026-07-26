@@ -32,19 +32,28 @@ public class CameraRig : MonoBehaviour
     public Train cabTrain;
     Quaternion cabRot = Quaternion.identity;
 
+    // 地図視点は18kmまで映すのでニアクリップが1m。運転台とモニターは目線から
+    // 0.5〜1.1mの距離にあるため、そのままだと**まるごと切り取られて見えない**。
+    // 車窓の間だけ手前まで映すようにする(2026-07-27にユーザーが実機で発見)
+    const float MapNearClip = 1f;
+    const float CabNearClip = 0.05f;
+
     public void EnterCab(Train t)
     {
-        if (cabTrain != null && cabTrain != t) cabTrain.SetFrontFaceVisible(true);
+        if (cabTrain != null && cabTrain != t) cabTrain.SetWindscreenVisible(true);
         cabTrain = t;
         t.CabPose(out var p, out var f);
         cabRot = Quaternion.LookRotation(f, Vector3.up);
-        t.SetFrontFaceVisible(false);   // 運転士目線で前が見えるように前面だけ隠す
+        // 窓ガラスだけ外して「窓越し」にする(枠・ピラーは残す)
+        t.SetWindscreenVisible(false);
+        if (cam != null) cam.nearClipPlane = CabNearClip;
     }
 
     public void ExitCab()
     {
-        if (cabTrain != null) cabTrain.SetFrontFaceVisible(true);
+        if (cabTrain != null) cabTrain.SetWindscreenVisible(true);
         cabTrain = null;
+        if (cam != null) cam.nearClipPlane = MapNearClip;
     }
 
     public void Setup()
@@ -54,7 +63,7 @@ public class CameraRig : MonoBehaviour
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = new Color(0.68f, 0.81f, 0.93f);
         cam.farClipPlane = 18000f;
-        cam.nearClipPlane = 1f;
+        cam.nearClipPlane = MapNearClip;
         gameObject.tag = "MainCamera";
         Apply();
     }

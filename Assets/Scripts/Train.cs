@@ -845,14 +845,20 @@ public class Train : MonoBehaviour
             monitorCam.fieldOfView = 62f;
             monitorCam.nearClipPlane = 0.3f;
             monitorCam.farClipPlane = 400f;
-            monitorMat = new Material(MatLib.Get("TrainLight")) { mainTexture = monitorRt };
+            // 画面はライティングを受けない無地シェーダで映す。通常の(陰影のつく)
+            // マテリアルだと、運転士の方を向いた面には光が当たらず真っ暗になる。
+            // SpritesDefaultはResources内のマテリアルなので、WebGLビルドで
+            // シェーダが除去される心配がない
+            monitorMat = new Material(MatLib.Get("SpritesDefault")) { mainTexture = monitorRt };
+            monitorMat.color = Color.white;
             monitorQuad.GetComponent<MeshRenderer>().sharedMaterial = monitorMat;
         }
         // 先頭車の外側から、ホーム側の側面に沿って後方を見る(実車のITVと同じ考え方)
         float sx = doorSide == 0 ? -1 : doorSide;
         monitorCam.transform.localPosition =
             new Vector3(sx * (TrainVisual.BodyHalfWidth + 0.45f), 3.4f, TrainVisual.HalfLenPublic - 0.4f);
-        monitorCam.transform.localRotation = Quaternion.Euler(12f, 180f - sx * 16f, 0);
+        // 後方を見つつ、車体側(内側)へ振る。符号を逆にすると線路の外側=空を映す
+        monitorCam.transform.localRotation = Quaternion.Euler(10f, 180f + sx * 18f, 0);
         monitorCam.enabled = true;
     }
 
@@ -880,18 +886,16 @@ public class Train : MonoBehaviour
     // 前面は「黒いパネル+ガラス板」を重ねた作りで**開口が無い**ため、運転士目線だと
     // 前が見えない。車窓モードの間だけ、乗っている先頭車の前面だけを隠す
     // (外から見る他の列車には影響しない)。運転台側にピラーがあるので枠は残る
-    static readonly string[] FaceParts =
-        { "Face", "FaceGlass", "FaceRed", "FaceBlue", "FaceLite" };
-
-    public void SetFrontFaceVisible(bool visible)
+    // 窓ガラス(不透明)だけを外す。枠・ピラー・帯は残すので**窓越しの眺め**になる。
+    // 前面ごと隠すと窓枠が消えて「ただ外が見えるだけ」になってしまう
+    public void SetWindscreenVisible(bool visible)
     {
         foreach (Transform car in transform)
         {
             if (car.name != "Car0") continue;
-            foreach (var partName in FaceParts)
+            var part = car.Find("FaceGlass");
+            if (part != null)
             {
-                var part = car.Find(partName);
-                if (part == null) continue;
                 var mr = part.GetComponent<MeshRenderer>();
                 if (mr != null) mr.enabled = visible;
             }
