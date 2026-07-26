@@ -673,9 +673,12 @@ public class Station : MonoBehaviour
     const float MarkerLateral = 1.00f;   // 線路中心から(車体の下に収まる)
     const float MarkerPlateW = 0.34f;    // 板の幅
     const float MarkerPlateY = 0.55f;    // 標識板の中心高さ(レール面から)
-    // 停止時の鼻先から標識までの距離。実機(402×874)の車窓へ投影して測った値で、
-    // 板の下端が画面高の1.5%、上端が7.2%に来る=画面下端にちょうど板が収まる
-    const float MarkerAhead = 7.0f;
+    // 停止時の鼻先から標識までの距離。実機(402×874)の車窓へ投影して測った値。
+    // **車窓でも下部ナビ(運行/線路/駅/系統/車窓)が画面下端を覆う**ので、
+    // キャンバスの下端ではなくナビの上端(画面高の9.9%)より上に出す必要がある。
+    // 8.5mで板の下端が14.2%・上端が18.1%となり、ナビの上へ余白を残して収まる
+    // (7.0mだとナビの裏に完全に隠れた。2026-07-26にユーザーが実機で発見)
+    const float MarkerAhead = 8.5f;
 
     void AddStopMarkers(RailKit.MeshData post, RailKit.MeshData plate)
     {

@@ -12,6 +12,18 @@ public class StopMarkerTests
     const float ScreenW = 402f, ScreenH = 874f;
     const float Fov = 60f;              // CameraRigはCameraの既定FOVをそのまま使う
     const float LookDownY = 0.06f;      // CameraRigの車窓が加える下向き成分
+    const float SafeBottomPx = 34f;     // ホームインジケータぶん(iPhoneでの想定最大)
+
+    // 車窓でも下部ナビが画面下端を覆う。その上端が画面高のどこに来るか。
+    // パネル高と同じくCanvasScalerの参照単位で計算する必要がある
+    static float ToolbarTopFraction()
+    {
+        float scale = Mathf.Sqrt((ScreenW / UIController.ReferenceResolution.x)
+                               * (ScreenH / UIController.ReferenceResolution.y));
+        float canvasH = ScreenH / scale;
+        float toolbarTop = UIController.PortraitToolbarHeight + SafeBottomPx / scale;
+        return toolbarTop / canvasH;
+    }
 
     [TearDown]
     public void TearDown()
@@ -50,21 +62,23 @@ public class StopMarkerTests
         camGo.transform.SetPositionAndRotation(pos,
             Quaternion.LookRotation((fwd + Vector3.down * LookDownY).normalized, Vector3.up));
 
-        // この編成の停止位置目標(板)の中心を探す
+        // この編成の停止位置目標(板)を**実際に生成されたメッシュから**探す。
+        // 期待位置を定数で書いてしまうと、標識が動いてもテストが通ってしまう
         float nose = train.fm.cars * StationLayout.CarLength * 0.5f;
         var signs = st.transform.Find("StationSigns").GetComponent<MeshFilter>().sharedMesh;
         float bestD = float.MaxValue;
-        Vector3 best = Vector3.zero, bestLocal = Vector3.zero;
+        Vector3 bestLocal = Vector3.zero;
         foreach (var v in signs.vertices)
         {
             if (v.y > 1.0f) continue;                       // 低い停車位置目標だけ
-            float d = Mathf.Abs(v.z - nose) + Mathf.Abs(v.y - 0.55f) * 10f;
-            if (d < bestD) { bestD = d; bestLocal = v; best = st.transform.TransformPoint(v); }
+            if (v.z < nose) continue;                       // 進行方向の前にあるものだけ
+            float d = v.z - nose;
+            if (d < bestD) { bestD = d; bestLocal = v; }
         }
         Assert.That(bestD, Is.LessThan(float.MaxValue), "停車位置目標が生成されていること");
 
-        var centre = st.transform.TransformPoint(
-            new Vector3(bestLocal.x, 0.55f, Mathf.Sign(bestLocal.z) * (nose + 7.0f)));
+        // 見つけた頂点のx/zをそのまま使い、yは板の中心へ寄せる(頂点は上下端にある)
+        var centre = st.transform.TransformPoint(new Vector3(bestLocal.x, 0.55f, bestLocal.z));
         var vpCentre = cam.WorldToViewportPoint(centre);
         var vpBottom = cam.WorldToViewportPoint(
             centre + Vector3.down * 0.15f);   // 板の高さ0.30の半分
@@ -84,11 +98,13 @@ public class StopMarkerTests
         float plateBottomY;
         var vp = MarkerViewport(st, train, out plateBottomY);
 
+        float barTop = ToolbarTopFraction();
         Assert.That(vp.z, Is.GreaterThan(0f), "標識がカメラの前方にあること");
-        Assert.That(plateBottomY, Is.GreaterThan(0f),
-            "板の下端が画面内に収まること(下端y=" + plateBottomY.ToString("F3") + ")");
-        Assert.That(vp.y, Is.LessThan(0.12f),
-            "板が画面下端の近くにあること(中心y=" + vp.y.ToString("F3") + ")");
+        Assert.That(plateBottomY, Is.GreaterThan(barTop + 0.02f),
+            "板が下部ナビ(上端" + barTop.ToString("F3") + ")の裏に隠れないこと" +
+            "(板の下端y=" + plateBottomY.ToString("F3") + ")");
+        Assert.That(vp.y, Is.LessThan(0.30f),
+            "それでも画面下寄りに留まること(中心y=" + vp.y.ToString("F3") + ")");
         Assert.That(vp.x, Is.InRange(0.0f, 1.0f),
             "板が横方向にも画面内へ収まること(x=" + vp.x.ToString("F3") + ")");
     }
@@ -106,7 +122,7 @@ public class StopMarkerTests
             float nose = f.cars * StationLayout.CarLength * 0.5f;
             foreach (int sign in new[] { -1, 1 })
             {
-                float want = sign * (nose + 7.0f);
+                float want = sign * (nose + 8.5f);
                 bool found = false;
                 foreach (var v in signs.vertices)
                     if (v.y < 1.0f && Mathf.Abs(v.z - want) < 0.1f) { found = true; break; }
