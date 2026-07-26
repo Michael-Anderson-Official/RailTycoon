@@ -493,6 +493,10 @@ public class Station : MonoBehaviour
     // 範囲は隣接区間長のおよそ3/4なので、この長さを短くするほど収束の滲み出しが
     // ホーム側へ届かなくなる
     public const float PlatformEndHold = 3f;
+    // リード(渡り線を置く直線)へ収束の丸めを滲み出させないための押さえ。
+    // これが無いと、渡り線が始まる位置で番線中心線が±2.3へ収束しきらず、
+    // そこを渡る列車が描かれたレールから最大0.34m外れる
+    public const float LeadHold = 3f;
 
     // RebuildTrackVisualが実際に描画へ渡した線ごとの中心線(ローカル、平滑化済み)。
     // 走行経路もここから切り出すので、レールと列車の通り道は同じ実体になる
@@ -535,12 +539,22 @@ public class Station : MonoBehaviour
         float off = layout.trackOffsets[i];
         float end = Mathf.Sign(off) * 2.3f;
         float H = HalfLen, T = StationLayout.ThroatLen, L = StationLayout.LeadLen;
+        // リード(駅端手前L)は渡り線を置く直線区間で、本線の±2.3に揃っていなければ
+        // ならない。ところが最後にChaikinで平滑化するため、収束の角がリード側へ
+        // 丸めとして滲み出し、渡り線が始まる位置(端からL/2+13m)でまだ±2.3に達しない
+        // (2面4線の外側で-3.04、4面8線で-4.08)。描かれた渡り線は±2.3から引かれるので、
+        // そこを渡る列車がレールから最大0.34m外れていた。
+        // ホーム端のPlatformEndHoldと同じ考えで、収束の終わり際にもう1点「押さえ」を
+        // 置き、角の丸めをリードの外へ出さない。効いているのは点を足すこと自体で、
+        // LeadHoldぶん手前へずらすのは念のための余裕(点を消すと0.34m外れる)
         float cz = H + (T - L), mz = H + (T - L) * 0.5f;
+        float czEnd = cz - LeadHold;
         var pts = new List<Vector3>();
         if (cMinus)
         {
             pts.Add(new Vector3(end, 0, -(H + T)));
             pts.Add(new Vector3(end, 0, -cz));
+            pts.Add(new Vector3(end, 0, -czEnd));
             pts.Add(new Vector3((off + end) * 0.5f, 0, -mz));
         }
         // ホーム端の直前に「押さえ」の点を入れる。この経路は最後にChaikinで平滑化
@@ -555,6 +569,7 @@ public class Station : MonoBehaviour
         if (cPlus)
         {
             pts.Add(new Vector3((off + end) * 0.5f, 0, mz));
+            pts.Add(new Vector3(end, 0, czEnd));
             pts.Add(new Vector3(end, 0, cz));
             pts.Add(new Vector3(end, 0, H + T));
         }
