@@ -518,6 +518,21 @@ public class Train : MonoBehaviour
     // 走行中の区間(最終区間・未解放の通過区間)としてsegを掴んでいるか。
     // 線路の撤去時に、影響を受ける列車だけを組み直すために使う
     // (無関係な列車まで組み直すと、走行中の位置・速度が失われてダイヤが乱れる)
+    // この列車の現在の走行に駅stが関わるか。停車駅(route)だけでなく、
+    // **通過駅として素通りする駅**も含む。
+    // 走行中の経路(BuildMultiLeg)は通過駅の構内線形をそのまま取り込むため、
+    // 通過駅を建て替えると経路が古い番線位置のまま残り、新しいホームの上を走ってしまう。
+    // RouteHasだけで再同期すると通過列車が取り残される(2026-07-26にユーザーが実機で発見)
+    public bool PassesThrough(Station st)
+    {
+        if (st == null) return false;
+        if (route != null && route.Contains(st)) return true;
+        // 消化済みも含めて見る。現在の脚(leg)全体が古い線形で作られているため
+        foreach (var cp in transitCheckpoints)
+            if (!cp.isSegment && cp.trackStation == st) return true;
+        return false;
+    }
+
     public bool HoldsSegment(TrackSegment seg)
     {
         if (seg == null) return false;
@@ -539,8 +554,9 @@ public class Train : MonoBehaviour
         for (int i = nextTransitCheckpoint; i < transitCheckpoints.Count; i++)
         {
             var cp = transitCheckpoints[i];
-            if (cp.isSegment) cp.seg.Leave(cp.segFrom, this);
-            else cp.trackStation.Release(cp.track);
+            // 駅・線路が撤去された直後にも呼ばれるので、破棄済みの参照を踏まない
+            if (cp.isSegment) { if (cp.seg != null) cp.seg.Leave(cp.segFrom, this); }
+            else if (cp.trackStation != null) cp.trackStation.Release(cp.track);
         }
         transitCheckpoints.Clear();
         nextTransitCheckpoint = 0;
@@ -557,8 +573,9 @@ public class Train : MonoBehaviour
         for (int i = nextTransitCheckpoint; i < transitCheckpoints.Count; i++)
         {
             var cp = transitCheckpoints[i];
-            if (cp.isSegment) cp.seg.Leave(cp.segFrom, this);
-            else cp.trackStation.Release(cp.track);
+            // 駅・線路が撤去された直後にも呼ばれるので、破棄済みの参照を踏まない
+            if (cp.isSegment) { if (cp.seg != null) cp.seg.Leave(cp.segFrom, this); }
+            else if (cp.trackStation != null) cp.trackStation.Release(cp.track);
         }
         transitCheckpoints.Clear();
         nextTransitCheckpoint = 0;

@@ -364,9 +364,19 @@ public class BuildController : MonoBehaviour
         foreach (var seg in TrackNetwork.segments)
             if (seg.a == st || seg.b == st) seg.Build(WorldRoot);
 
-        // この駅を通る列車を現在駅に復帰(予約取り直し・番線整合)
+        // この駅を通る列車を現在駅に復帰(予約取り直し・番線整合)。
+        // **停車駅だけでなく通過駅として素通りする列車も対象にする**。走行中の経路は
+        // 通過駅の構内線形を取り込んでいるので、取り残すと古い番線位置のまま走り続け、
+        // 新しいホームの上を走ってしまう。接続線路も上で作り直しているため、
+        // その線路を走行中の列車も同じ理由で作り直す
         foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
-            if (t.RouteHas(st)) t.ResyncToNetwork();
+        {
+            bool affected = t.PassesThrough(st);
+            if (!affected)
+                foreach (var seg in TrackNetwork.segments)
+                    if ((seg.a == st || seg.b == st) && t.HoldsSegment(seg)) { affected = true; break; }
+            if (affected) t.ResyncToNetwork();
+        }
 
         // 系統の番線も新レイアウトへ整合(無効になった番線は停車線へ)
         foreach (var l in Services.lines)
@@ -417,6 +427,20 @@ public class BuildController : MonoBehaviour
     {
         double refund = GameState.StationCost(st.cars, st.faces, st.lines, st.level) * 0.5;
         int removedTrains = 0;
+        // 撤去後に再同期する列車を先に控える。停車駅として含む列車は下で撤去するので
+        // 対象外。通過駅として素通りするだけの列車は残るが、経路が消える駅・線路の
+        // 線形を取り込んだままなので、撤去後に作り直さないと宙を走ることになる
+        var needResync = new List<Train>();
+        int removedLines = 0;
+        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+        {
+            if (t.RouteHas(st)) continue;
+            bool affected = t.PassesThrough(st);
+            if (!affected)
+                foreach (var seg in TrackNetwork.segments)
+                    if ((seg.a == st || seg.b == st) && t.HoldsSegment(seg)) { affected = true; break; }
+            if (affected) needResync.Add(t);
+        }
         foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
         {
             if (!t.RouteHas(st)) continue;
@@ -439,12 +463,44 @@ public class BuildController : MonoBehaviour
         }
         foreach (var nb in neighbors) nb.RebuildTrackVisual();   // 端が空いたので頭端(車止め)に戻す
         // この駅を含む運行系統は成立しないので廃止(列車は上でRouteHasにより撤去済み)
-        int removedLines = Services.lines.RemoveAll(l => l.route.Contains(st));
+        removedLines += Services.lines.RemoveAll(l => l.route.Contains(st));
         selLines.RemoveAll(l => !Services.lines.Contains(l));
         TrackNetwork.stations.Remove(st);
         DestroySafe(st.gameObject);
-        GameState.Refund(refund);
         TrackNetwork.MarkDirty();
+
+        // 駅と接続線路が消えたことで経路が分断され、走れなくなった系統・列車を畳む。
+        // RemoveSegmentと同じ判定にそろえる。ここを省くと、通過駅を撤去したときに
+        // 到達不能な系統と、発車できないまま居座る列車が残る
+        // (実装後レビューでCodex CLIが指摘)
+        bool StillRunnable(List<Station> route)
+        {
+            if (route == null) return false;
+            for (int i = 0; i + 1 < route.Count; i++)
+                if (TrackNetwork.FindPath(route[i], route[i + 1]) == null) return false;
+            return true;
+        }
+        var deadLines = Services.lines.FindAll(l => !StillRunnable(l.route));
+        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+        {
+            if (t.route == null) continue;
+            bool dead = !StillRunnable(t.route)
+                || (t.lineIds != null && t.lineIds.Exists(id => deadLines.Exists(l => l.id == id)));
+            if (!dead) continue;
+            refund += t.RefundValue;
+            removedTrains++;
+            needResync.Remove(t);
+            t.ReleaseAll();
+            TrackNetwork.trains.Remove(t);
+            DestroySafe(t.gameObject);
+        }
+        foreach (var l in deadLines) { Services.lines.Remove(l); removedLines++; }
+        selLines.RemoveAll(l => !Services.lines.Contains(l));
+
+        // 生き残った列車だけ、新しい網に対して経路を引き直させる
+        foreach (var t in needResync) if (t != null) t.ResyncToNetwork();
+        // 払い戻しは、畳んだ列車のぶんを足し終えてから行う
+        GameState.Refund(refund);
         SaveLoad.Save();
         if (UIController.I != null) UIController.I.RefreshTrainPanel();
         UIController.Toast(st.stationName + "を撤去(払戻 " + (refund / 1e8).ToString("F1") + "億円"
