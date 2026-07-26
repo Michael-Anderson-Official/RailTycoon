@@ -403,6 +403,8 @@ public class Station : MonoBehaviour
             RailKit.AddBox(metalwork, new Vector3(houseX + 5.12f, 2.15f, mullion * 1.35f),
                 new Vector3(0.1f, 3.0f, 0.1f), Quaternion.identity);
 
+        AddStopMarkers(metalwork, signBoard);
+
         // 高架駅は桁と橋脚で地面まで支える。ローカルy=0がレール基面なので、
         // 桁はその直下、橋脚はさらに地面(ローカルy=-Height)まで下ろす
         if (level != 0)
@@ -655,6 +657,84 @@ public class Station : MonoBehaviour
                 RailKit.AddBox(md, new Vector3(sx * px, pierBottom + pierH * 0.5f, z),
                     new Vector3(pw, pierH, pw), Quaternion.identity);
         }
+    }
+
+    // ---- 停止位置目標 ----
+    // 運転士がここへ先頭を合わせて停める標識。前面展望で「画面下端に来たら停止」
+    // という目安になるよう、車窓カメラの幾何から逆算した位置に置く。
+    //
+    // 車窓カメラ(Train.CabPose)は鼻先の2.2m前・レール面から3.46m
+    // (BogieRootY + TrainVisual.CabEyeLocalY)の高さで、CameraRigが約3.4°下を向ける。
+    // 垂直画角はCameraの既定60°。実機は縦画面(402×874)で水平画角が約30°しかないため、
+    // 線路脇に人の背丈で立てると画面下端へ来る前に横へ切れてしまう。
+    // そのため実物の低い停止位置目標と同じく、低く・線路寄りに置く
+    // 横方向は2つの制約の間に収める必要がある。内側=レールへ重ねない(板の内端が
+    // 軌間の外)、外側=縦画面の車窓の横画角(約30°)から外さない
+    const float MarkerLateral = 1.00f;   // 線路中心から(車体の下に収まる)
+    const float MarkerPlateW = 0.34f;    // 板の幅
+    const float MarkerPlateY = 0.55f;    // 標識板の中心高さ(レール面から)
+    // 停止時の鼻先から標識までの距離。実機(402×874)の車窓へ投影して測った値で、
+    // 板の下端が画面高の1.5%、上端が7.2%に来る=画面下端にちょうど板が収まる
+    const float MarkerAhead = 7.0f;
+
+    void AddStopMarkers(RailKit.MeshData post, RailKit.MeshData plate)
+    {
+        // 建設プレビューには要らない。両数ぶんのTextMeshを毎回作り直すのは無駄
+        if (preview || layout.stopTracks == null) return;
+        foreach (int t in layout.stopTracks)
+        {
+            float tx = layout.trackOffsets[t];
+            foreach (int n in SupportedFormationCars())
+            {
+                // 先頭がここへ来る(Train.HalfTrainと同じ規約)
+                float nose = n * StationLayout.CarLength * 0.5f;
+                for (int sign = -1; sign <= 1; sign += 2)
+                {
+                    float z = sign * (nose + MarkerAhead);
+                    if (Mathf.Abs(z) > HalfLen + StationLayout.ThroatLen * 0.5f) continue;
+                    // 日本の左側通行に合わせ、運転台のある進行方向左側へ置く
+                    float x = tx - sign * MarkerLateral;
+                    RailKit.AddBox(post, new Vector3(x, MarkerPlateY * 0.5f, z),
+                        new Vector3(0.09f, MarkerPlateY, 0.09f), Quaternion.identity);
+                    // 板は進行方向の逆(近づいてくる列車)へ向ける
+                    RailKit.AddBox(plate, new Vector3(x, MarkerPlateY, z),
+                        new Vector3(MarkerPlateW, 0.30f, 0.05f), Quaternion.identity);
+                    // 両数を書き入れる。複数の停止位置が並ぶので、番号が無いと
+                    // どれが自分の位置か分からない
+                    CreateStopMarkerText(n, t, sign,
+                        new Vector3(x, MarkerPlateY, z - sign * 0.04f));
+                }
+            }
+        }
+    }
+
+    // 停止位置目標の両数表示。近づいてくる列車(進行方向の逆)へ向ける
+    void CreateStopMarkerText(int carCount, int track, int sign, Vector3 localPosition)
+    {
+        var go = new GameObject("StopMarkerText_" + track + "_" + sign + "_" + carCount);
+        go.transform.SetParent(transform, false);
+        go.transform.localPosition = localPosition;
+        // TextMeshは-z側から読める向きに出るので、+z進行(=-z側から見る)は回転0
+        go.transform.localRotation = Quaternion.Euler(0, sign > 0 ? 0f : 180f, 0);
+        var tm = go.AddComponent<TextMesh>();
+        tm.font = MatLib.JpFont;
+        tm.text = carCount.ToString();
+        tm.fontSize = 64;
+        tm.characterSize = 0.040f;
+        tm.anchor = TextAnchor.MiddleCenter;
+        tm.alignment = TextAlignment.Center;
+        tm.color = Color.white;
+        go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
+    }
+
+    // この駅に停まれる編成の両数(重複を除く)
+    List<int> SupportedFormationCars()
+    {
+        var list = new List<int>();
+        foreach (var f in TrainCatalog.Formations)
+            if (f.cars <= cars && !list.Contains(f.cars)) list.Add(f.cars);
+        list.Sort();
+        return list;
     }
 
     // ベンチ・待合室などの設備を線路から逃がす向き(ホームローカルのx)。
