@@ -781,8 +781,13 @@ public class Train : MonoBehaviour
             var ordered = new List<Vector3>(local);
             if (!departing) ordered.Reverse();
             var rebuilt = new List<Vector3>(ordered.Count + cross.Count);
+            // 渡り線より手前(ホーム側)は**中心線をそのまま使う**。ここでxをconv(±2.3)へ
+            // 潰してはいけない。convはスロート端での収束位置でしかなく、ホーム部の
+            // 番線座標(島式なら±5.48、2面4線の外側なら±13.26)とは別物なので、
+            // 潰すと列車がホームの内側を走る。中心線は収束の形を既に持っている
+            // (2026-07-26にユーザーが実機で発見。相対式は番線が偶然±2.3なので露見しなかった)
             foreach (var p in ordered)
-                if ((p.z - zA) * sign < 0f) rebuilt.Add(new Vector3(conv, p.y, p.z));
+                if ((p.z - zA) * sign < 0f) rebuilt.Add(p);
             foreach (var c in cross) rebuilt.Add(c);
             foreach (var p in ordered)
                 if ((p.z - zB) * sign > 0f) rebuilt.Add(new Vector3(mainOffset, p.y, p.z));
