@@ -269,6 +269,11 @@ git checkout -- Assets/ && git checkout master && git branch -D review-tmp
 
 ## 直近の変更(新しい順)
 
+- 前面展望を運転士目線へ(`TrainCab`)。運転席は左、着席目線。運転台は世代で作り分け
+  (実車写真が無いため一般的な配置に基づく)。前面は開口が無いので車窓中だけ隠す。
+  ドアはホーム側だけ開閉し、車窓中は運転台のモニターに車側カメラの映像が映る。
+  **RenderTexture/Materialはネイティブ資源**なので、撤去時に`DisposeVisuals()`で明示的に
+  解放する(OnDestroy内のDestroyImmediateはエディタで効かない)
 - 曲線・分岐の速度制限を追加(`Train.BuildSpeedProfile`)。経路の曲率から各点の上限を
   求め、後ろ向き走査で「下流の制限へ減速しきれる速度」にする。渡り線は22km/h前後
   (実物の8番分岐器相当)。直進は制限しない。加速の頭打ちも実車の特性(定トルク域→

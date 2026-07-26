@@ -446,7 +446,8 @@ public class BuildController : MonoBehaviour
             if (!t.RouteHas(st)) continue;
             refund += t.RefundValue;
             removedTrains++;
-            t.ReleaseAll();               // 隣駅などに残る予約を解放してから破棄
+            t.ReleaseAll();       // 隣駅などに残る予約を解放してから破棄
+            t.DisposeVisuals();   // モニターのRenderTexture/Materialを解放
             TrackNetwork.trains.Remove(t);
             DestroySafe(t.gameObject);
         }
@@ -495,6 +496,7 @@ public class BuildController : MonoBehaviour
             removedTrains++;
             needResync.Remove(t);
             t.ReleaseAll();
+            t.DisposeVisuals();   // モニターのRenderTexture/Materialを解放
             TrackNetwork.trains.Remove(t);
             DestroySafe(t.gameObject);
         }
@@ -550,6 +552,7 @@ public class BuildController : MonoBehaviour
             refund += t.RefundValue;
             removedTrains++;
             t.ReleaseAll();
+            t.DisposeVisuals();   // モニターのRenderTexture/Materialを解放
             TrackNetwork.trains.Remove(t);
             DestroySafe(t.gameObject);
         }
@@ -817,6 +820,7 @@ public class BuildController : MonoBehaviour
             if (t.lineIds == null || !t.lineIds.Contains(line.id)) continue;
             refund += t.RefundValue; n++;
             t.ReleaseAll();
+            t.DisposeVisuals();   // モニターのRenderTexture/Materialを解放
             TrackNetwork.trains.Remove(t);
             DestroySafe(t.gameObject);
         }

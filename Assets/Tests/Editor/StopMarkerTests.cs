@@ -13,6 +13,8 @@ public class StopMarkerTests
     const float Fov = 60f;              // CameraRigはCameraの既定FOVをそのまま使う
     const float LookDownY = 0.06f;      // CameraRigの車窓が加える下向き成分
     const float SafeBottomPx = 34f;     // ホームインジケータぶん(iPhoneでの想定最大)
+    // 運転台(計器盤)が画面下を占める割合。TrainCabの寸法から実測した値
+    const float CabTopFraction = 0.21f;
 
     // 車窓でも下部ナビが画面下端を覆う。その上端が画面高のどこに来るか。
     // パネル高と同じくCanvasScalerの参照単位で計算する必要がある
@@ -103,7 +105,11 @@ public class StopMarkerTests
         Assert.That(plateBottomY, Is.GreaterThan(barTop + 0.02f),
             "板が下部ナビ(上端" + barTop.ToString("F3") + ")の裏に隠れないこと" +
             "(板の下端y=" + plateBottomY.ToString("F3") + ")");
-        Assert.That(vp.y, Is.LessThan(0.30f),
+        // 運転士目線にしてから、画面下は運転台(計器盤)が占める。その上に出ること
+        Assert.That(plateBottomY, Is.GreaterThan(CabTopFraction + 0.01f),
+            "板が運転台(上端" + CabTopFraction.ToString("F2") + ")に隠れないこと" +
+            "(板の下端y=" + plateBottomY.ToString("F3") + ")");
+        Assert.That(vp.y, Is.LessThan(0.45f),
             "それでも画面下寄りに留まること(中心y=" + vp.y.ToString("F3") + ")");
         Assert.That(vp.x, Is.InRange(0.0f, 1.0f),
             "板が横方向にも画面内へ収まること(x=" + vp.x.ToString("F3") + ")");

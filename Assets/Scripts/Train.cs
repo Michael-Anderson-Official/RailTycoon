@@ -744,6 +744,161 @@ public class Train : MonoBehaviour
         passed = nextTransitCheckpoint;
     }
 
+    // ---- ドアの開閉とドアモニター(視覚専用。乗降人数・運賃には影響しない) ----
+    readonly List<(Transform t, int side, int dir, Vector3 closed)> doorLeaves =
+        new List<(Transform, int, int, Vector3)>();
+    Transform monitorQuad;
+    Camera monitorCam;
+    RenderTexture monitorRt;
+    Material monitorMat;
+    float doorOpen;            // 0=閉 1=開
+    int doorSide;              // 開ける側(車体ローカルのx符号)。0=どちらも開けない
+    public float DoorOpenRatio => doorOpen;
+    public int OpenDoorSide => doorSide;
+
+    void CollectDoorLeaves()
+    {
+        doorLeaves.Clear();
+        foreach (Transform car in transform)
+        {
+            if (!car.name.StartsWith("Car")) continue;
+            foreach (Transform leaf in car)
+            {
+                if (!leaf.name.StartsWith("DoorLeaf_")) continue;
+                var parts = leaf.name.Split('_');
+                if (parts.Length != 3) continue;
+                int side = int.Parse(parts[1]), dir = int.Parse(parts[2]);
+                doorLeaves.Add((leaf, side, dir, leaf.localPosition));
+            }
+        }
+    }
+
+    // 停車中の駅で、ホームがどちら側にあるか(車体ローカルのx符号)。無ければ0
+    int PlatformSideAt(Station st, int track)
+    {
+        if (st == null || st.layout.platforms == null) return 0;
+        foreach (var e in st.layout.edges)
+        {
+            if (e.trackIndex != track) continue;
+            float trackX = st.layout.trackOffsets[track];
+            float px = st.layout.platforms[e.platformIndex].x;
+            // 駅ローカルでホームが線路のどちら側にあるか。車体は進行方向で向きが
+            // 変わるので、駅の軸と列車の向きの内積で符号を合わせる
+            int sideInStation = px > trackX ? 1 : -1;
+            float dot = Vector3.Dot(st.Axis, transform.rotation * Vector3.forward);
+            return dot >= 0f ? sideInStation : -sideInStation;
+        }
+        return 0;
+    }
+
+    // Bootstrapがtick消化後に呼ぶ。dtはシミュレーション秒
+    public void UpdateDoors(float dt)
+    {
+        if (doorLeaves.Count == 0) CollectDoorLeaves();
+
+        // 停車中で、発車まで少し余裕があるうちだけ開ける
+        bool shouldOpen = state == St.Dwell && dwellT > DoorCloseLead;
+        if (shouldOpen && doorSide == 0)
+        {
+            var st = route != null && idx < route.Count ? route[idx] : null;
+            doorSide = PlatformSideAt(st, curTrack);
+        }
+        if (!shouldOpen && doorOpen <= 0f) doorSide = 0;
+
+        float target = shouldOpen && doorSide != 0 ? 1f : 0f;
+        doorOpen = Mathf.MoveTowards(doorOpen, target, dt / DoorTravelSeconds);
+
+        foreach (var d in doorLeaves)
+        {
+            float open = d.side == doorSide ? doorOpen : 0f;
+            d.t.localPosition = d.closed +
+                new Vector3(0, 0, d.dir * TrainVisual.DoorLeafWidth * open);
+        }
+        UpdateMonitor();
+    }
+
+    const float DoorTravelSeconds = 2.2f;   // 開ききる/閉まりきるまで
+    const float DoorCloseLead = 4f;         // 発車の何秒前に閉め始めるか
+
+    // ドアモニター。車窓モードで、かつドアが開いている間だけ映す
+    void UpdateMonitor()
+    {
+        bool want = doorOpen > 0.02f && CameraRig.I != null && CameraRig.I.cabTrain == this;
+        if (!want)
+        {
+            if (monitorCam != null) monitorCam.enabled = false;
+            return;
+        }
+        if (monitorQuad == null)
+        {
+            foreach (Transform car in transform)
+                if (car.name == "Car0") { monitorQuad = car.Find("DoorMonitor"); break; }
+            if (monitorQuad == null) return;
+        }
+        if (monitorCam == null)
+        {
+            monitorRt = new RenderTexture(256, 160, 16);
+            var go = new GameObject("DoorMonitorCam");
+            go.transform.SetParent(monitorQuad.parent, false);
+            monitorCam = go.AddComponent<Camera>();
+            monitorCam.targetTexture = monitorRt;
+            monitorCam.fieldOfView = 62f;
+            monitorCam.nearClipPlane = 0.3f;
+            monitorCam.farClipPlane = 400f;
+            monitorMat = new Material(MatLib.Get("TrainLight")) { mainTexture = monitorRt };
+            monitorQuad.GetComponent<MeshRenderer>().sharedMaterial = monitorMat;
+        }
+        // 先頭車の外側から、ホーム側の側面に沿って後方を見る(実車のITVと同じ考え方)
+        float sx = doorSide == 0 ? -1 : doorSide;
+        monitorCam.transform.localPosition =
+            new Vector3(sx * (TrainVisual.BodyHalfWidth + 0.45f), 3.4f, TrainVisual.HalfLenPublic - 0.4f);
+        monitorCam.transform.localRotation = Quaternion.Euler(12f, 180f - sx * 16f, 0);
+        monitorCam.enabled = true;
+    }
+
+    // RenderTextureとMaterialは**ネイティブ資源**。GameObjectを破棄しても残り続けるので、
+    // 列車を撤去するたびに積み上がる。明示的に破棄すること
+    // (このリポジトリでMatLib.Tintedを用意したのと同じ理由。
+    //  実装後レビューでCodex CLIが指摘)
+    // 撤去する直前に呼ぶ。OnDestroyの中からのDestroyImmediateはエディタで効かないため、
+    // 撤去側から明示的に呼ぶ形にしてある(OnDestroyは取りこぼしの保険)
+    public void DisposeVisuals()
+    {
+        if (monitorCam != null) monitorCam.targetTexture = null;
+        if (monitorRt != null) { monitorRt.Release(); DestroyResource(monitorRt); monitorRt = null; }
+        if (monitorMat != null) { DestroyResource(monitorMat); monitorMat = null; }
+    }
+
+    void OnDestroy() => DisposeVisuals();
+
+    static void DestroyResource(Object o)
+    {
+        if (o == null) return;
+        if (Application.isPlaying) Destroy(o); else DestroyImmediate(o);
+    }
+
+    // 前面は「黒いパネル+ガラス板」を重ねた作りで**開口が無い**ため、運転士目線だと
+    // 前が見えない。車窓モードの間だけ、乗っている先頭車の前面だけを隠す
+    // (外から見る他の列車には影響しない)。運転台側にピラーがあるので枠は残る
+    static readonly string[] FaceParts =
+        { "Face", "FaceGlass", "FaceRed", "FaceBlue", "FaceLite" };
+
+    public void SetFrontFaceVisible(bool visible)
+    {
+        foreach (Transform car in transform)
+        {
+            if (car.name != "Car0") continue;
+            foreach (var partName in FaceParts)
+            {
+                var part = car.Find(partName);
+                if (part == null) continue;
+                var mr = part.GetComponent<MeshRenderer>();
+                if (mr != null) mr.enabled = visible;
+            }
+            return;
+        }
+    }
+
     // 前面展望カメラ用: 先頭車前端の位置と進行方向
     public void CabPose(out Vector3 pos, out Vector3 fwd)
     {
@@ -759,10 +914,24 @@ public class Train : MonoBehaviour
         fwd = pf - pr;
         if (fwd.sqrMagnitude < 1e-6f) fwd = f;
         fwd.Normalize();
-        // 前面ガラスは車体先端より前へ張り出すので、鼻先より少し前・運転席高さに置く
-        // (pfのままだと赤い前面の内側に入り画面が真っ赤になる)
-        pos = pf + fwd * 2.2f
-            + Vector3.up * (TrainVisual.BogieRootY + TrainVisual.CabEyeLocalY);
+        // 運転士目線。前面窓の**内側**、進行方向左(日本の一般)、着席目線の高さ。
+        // 以前は「赤い前面の内側に入ると画面が真っ赤になる」ため鼻先の2.2m前(車外)へ
+        // 逃がしていたが、運転台の内装(TrainCab)を作ったので車内で成立する。
+        //
+        // **経路上の停止位置ではなく先頭車の車体を基準にする**。車体長(19.4m)と
+        // 停止位置の間隔(20m)が違うため、経路から逆算すると運転台と0.3mずれる
+        if (carTs != null && carTs.Count > 0 && carTs[0].body != null)
+        {
+            var body = carTs[0].body;
+            pos = body.TransformPoint(new Vector3(TrainCab.EyeX, TrainCab.EyeY, TrainCab.EyeZ));
+            fwd = body.forward;
+            return;
+        }
+        var right = Quaternion.LookRotation(fwd, Vector3.up) * Vector3.right;
+        pos = pf
+            + fwd * (TrainCab.EyeZ - TrainVisual.HalfLenPublic)
+            + right * TrainCab.EyeX
+            + Vector3.up * (TrainVisual.BogieRootY + TrainCab.EyeY);
     }
 
     // 台車ごとの接線サンプル用の前後窓。狭くしすぎるとレール中心線の折れ点で

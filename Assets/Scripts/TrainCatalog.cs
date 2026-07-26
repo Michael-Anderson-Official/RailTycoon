@@ -16,6 +16,8 @@ public static class TrainCatalog
         public Color body, stripe, front;
         public Color band2;         // 窓下帯(未設定=stripeと同色)
         public bool keio5000;       // 京王5000系(2代)専用の作り込みを使う
+        // 運転台の世代。実車写真が手元に無いため、一般的な配置で作り分ける
+        public TrainCab.Style cabStyle = TrainCab.Style.OneHandle;
 
         public float Accel => accelKmhs / 3.6f; // m/s²
         public float Decel => decelKmhs / 3.6f;
@@ -43,25 +45,28 @@ public static class TrainCatalog
         accelKmhs = 3.3f, decelKmhs = 4.0f, costPerCarOku = 1.6f,
         // ステンレス車体 / 窓上=京王レッド / 窓下=京王ブルー / 前面=黒
         body = Hex("CFD3D7"), stripe = Hex("D6006F"), band2 = Hex("0064B4"), front = Hex("18181D"),
-        keio5000 = true,
+        keio5000 = true, cabStyle = TrainCab.Style.OneHandleLcd,
     };
     public static readonly TrainTypeDef Mei2000 = new TrainTypeDef
     {
         id = "mei2000", name = "名鉄2000系", capPerCar = 60, maxSpeedKmh = 120,
         accelKmhs = 2.3f, decelKmhs = 3.5f, costPerCarOku = 2.2f,
         body = Hex("2377BE"), stripe = Hex("F39800"), front = Hex("E8EEF4"),
+        cabStyle = TrainCab.Style.OneHandle,
     };
     public static readonly TrainTypeDef Mei2200 = new TrainTypeDef
     {
         id = "mei2200", name = "名鉄2200系", capPerCar = 115, maxSpeedKmh = 120,
         accelKmhs = 2.5f, decelKmhs = 3.5f, costPerCarOku = 1.7f,
         body = Hex("C9CDD2"), stripe = Hex("D5001C"), front = Hex("D5001C"),
+        cabStyle = TrainCab.Style.OneHandleLcd,
     };
     public static readonly TrainTypeDef Mei6000 = new TrainTypeDef
     {
         id = "mei6000", name = "名鉄6000系", capPerCar = 135, maxSpeedKmh = 100,
         accelKmhs = 2.0f, decelKmhs = 3.5f, costPerCarOku = 1.2f,
         body = Hex("D5001C"), stripe = Hex("D5001C"), front = Hex("D5001C"),
+        cabStyle = TrainCab.Style.TwoHandle,
     };
 
     public static readonly List<Formation> Formations = new List<Formation>

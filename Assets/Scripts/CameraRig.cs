@@ -5,6 +5,10 @@ using UnityEngine.EventSystems;
 // マウス: 左ドラッグ=パン、ホイール=ズーム、クリック=タップ扱い
 public class CameraRig : MonoBehaviour
 {
+    // 車窓モードかどうかをTrain側(ドアモニター)から見るため
+    public static CameraRig I;
+    void Awake() => I = this;
+
     public Vector3 target = Vector3.zero;
     public float distance = 600f;
     public float pitch = 52f;
@@ -30,12 +34,18 @@ public class CameraRig : MonoBehaviour
 
     public void EnterCab(Train t)
     {
+        if (cabTrain != null && cabTrain != t) cabTrain.SetFrontFaceVisible(true);
         cabTrain = t;
         t.CabPose(out var p, out var f);
         cabRot = Quaternion.LookRotation(f, Vector3.up);
+        t.SetFrontFaceVisible(false);   // 運転士目線で前が見えるように前面だけ隠す
     }
 
-    public void ExitCab() => cabTrain = null;
+    public void ExitCab()
+    {
+        if (cabTrain != null) cabTrain.SetFrontFaceVisible(true);
+        cabTrain = null;
+    }
 
     public void Setup()
     {

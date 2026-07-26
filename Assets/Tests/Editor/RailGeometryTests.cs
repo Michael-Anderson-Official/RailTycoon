@@ -112,8 +112,10 @@ public class RailGeometryTests
 
         train.CabPose(out Vector3 eye, out _);
 
+        // 運転士目線は運転台(TrainCab)の着席位置。車体rootを持ち上げても
+        // 前面窓に追従すること
         Assert.That(eye.y,
-            Is.EqualTo(TrainVisual.BogieRootY + TrainVisual.CabEyeLocalY).Within(0.001f),
+            Is.EqualTo(TrainVisual.BogieRootY + TrainCab.EyeY).Within(0.001f),
             "車体rootを持ち上げても運転士目線が前面窓に追従すること");
     }
 

@@ -170,6 +170,7 @@ public class Bootstrap : MonoBehaviour
             // 人の更新はSimTickの外で行う。シミュレーションの決定性に影響させないため
             float crowdDt = ticks * TickSeconds * GameState.timeScale;
             foreach (var st in TrackNetwork.stations) st.UpdateCrowd(crowdDt);
+            foreach (var t in TrackNetwork.trains) t.UpdateDoors(crowdDt);
         }
         return ticks;
     }

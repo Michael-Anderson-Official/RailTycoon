@@ -8,6 +8,12 @@ public static class TrainVisual
 {
     const float CarLen = 19.4f;
     const float HalfLen = CarLen * 0.5f;
+    public const float HalfLenPublic = HalfLen;   // 運転台・モニターの位置決めで使う
+    // 1箇所あたりの扉は両開き。片側1枚の幅(開くとこのぶんだけz方向へ引き込む)
+    public const float DoorLeafWidth = 0.64f;
+
+    // 可動する扉のGameObject名。side=車体の左右(-1/+1)、dir=開く向き(-1/+1)
+    public static string DoorLeafName(int side, int dir) => "DoorLeaf_" + side + "_" + dir;
     // 台車中心のz位置(車体ローカル、進行方向)。Train.PlaceCarsStaticが同じ値を
     // 参照して弧長サンプル位置を決めるので、変更する場合は両方を合わせること
     public const float BogieOffset = 6.2f;
@@ -121,11 +127,25 @@ public static class TrainVisual
                 float x = (BodyHalfWidth + 0.005f) * side;
                 // 連続窓帯(柱で個別窓に見える)
                 RailKit.AddBox(glass, new Vector3(x, 3.02f, 0), new Vector3(0.06f, 0.9f, CarLen - 2.2f), Quaternion.identity);
-                // ドア4枚(凹んだ暗色面+小窓)
-                foreach (float dz in doorZ)
+                // ドアは開閉させるので、同じ向きへ動く扉をまとめて1つの可動体にする。
+                // (1枚ずつGameObjectにするとオブジェクト数が跳ね上がる)
+                for (int dir = -1; dir <= 1; dir += 2)
                 {
-                    RailKit.AddBox(doors, new Vector3(x - 0.02f * side, 2.05f, dz), new Vector3(0.05f, 2.9f, 1.28f), Quaternion.identity);
-                    RailKit.AddBox(glass, new Vector3(x, 3.05f, dz), new Vector3(0.07f, 0.82f, 1.0f), Quaternion.identity);
+                    var leafPanel = new RailKit.MeshData();
+                    var leafGlass = new RailKit.MeshData();
+                    foreach (float dz in doorZ)
+                    {
+                        // 1箇所は両開き。dir側の扉のみをこの可動体に入れる
+                        float cz = dz + dir * DoorLeafWidth * 0.5f;
+                        RailKit.AddBox(leafPanel, new Vector3(x - 0.02f * side, 2.05f, cz),
+                            new Vector3(0.05f, 2.9f, DoorLeafWidth), Quaternion.identity);
+                        RailKit.AddBox(leafGlass, new Vector3(x, 3.05f, cz),
+                            new Vector3(0.07f, 0.82f, DoorLeafWidth - 0.28f), Quaternion.identity);
+                    }
+                    var leaf = new GameObject(DoorLeafName(side, dir));
+                    leaf.transform.SetParent(go.transform, false);
+                    RailKit.MeshGO("Panel", leafPanel.ToMesh(), doorMat, leaf.transform);
+                    RailKit.MeshGO("Glass", leafGlass.ToMesh(), glassMat, leaf.transform);
                 }
                 if (t.keio5000)
                 {
@@ -139,7 +159,7 @@ public static class TrainVisual
                 }
             }
             RailKit.MeshGO("Glass", glass.ToMesh(), glassMat, go.transform);
-            RailKit.MeshGO("Doors", doors.ToMesh(), doorMat, go.transform);
+            if (doors.v.Count > 0) RailKit.MeshGO("Doors", doors.ToMesh(), doorMat, go.transform);
             if (bandHi.v.Count > 0) RailKit.MeshGO("BandHi", bandHi.ToMesh(), stripeMat, go.transform);
             RailKit.MeshGO("BandLo", bandLo.ToMesh(), band2Mat, go.transform);
 
@@ -204,9 +224,13 @@ public static class TrainVisual
                 if (headEnd) AddFace(go.transform, +1, frontMat, glassMat, t);
                 if (tailEnd) AddFace(go.transform, -1, frontMat, glassMat, t);
             }
-            // 中間連結面は暗色の貫通路
-            if (!headEnd) AddGangway(go.transform, -1, doorMat);
-            if (!tailEnd) AddGangway(go.transform, +1, doorMat);
+            // 先頭車には運転台の内装(前面展望が運転士目線なので画面下に映る)
+            if (headEnd) TrainCab.Build(go.transform, t);
+            // 中間連結面は暗色の貫通路。**前に車両がある側が+z、後ろにある側が-z**。
+            // 以前は条件が逆で、先頭車の+z(=鼻先)に妻面を貼っていた。前面パネルに
+            // 隠れて外からは見えなかったが、運転士目線にすると前方を塞いでいた
+            if (!headEnd) AddGangway(go.transform, +1, doorMat);
+            if (!tailEnd) AddGangway(go.transform, -1, doorMat);
 
             cars.Add((go.transform, bogieF, bogieR));
         }
@@ -275,7 +299,7 @@ public static class TrainVisual
         RailKit.MeshGO("FaceCoupler", dark.ToMesh(), MatLib.Get("TrainUnder"), car);
     }
 
-    // 京王5000系(2代)の前面: 黒主体で大きく前傾、貫通扉は左(助士側)、窓上=赤/窓下=青帯、
+    // 京王5000系(2代)の前面: 黒主体で大きく前傾、貫通扉は右(助士側)、窓上=赤/窓下=青帯、
     // 窓下左右にLED灯、スカート+連結器
     static void AddKeioFace(Transform car, int sign, Material blackMat, Material glassMat, Material redMat, Material blueMat)
     {
@@ -296,11 +320,11 @@ public static class TrainVisual
         // 窓上=京王レッド帯 / 窓下=京王ブルー帯(前面に回り込む)
         RailKit.AddBox(red, c + q * new Vector3(0, 1.92f, 0.02f), new Vector3(2.74f, 0.16f, 0.32f), q);
         RailKit.AddBox(blue, c + q * new Vector3(0, -0.05f, 0.02f), new Vector3(2.74f, 0.24f, 0.32f), q);
-        // 運転席ガラス(貫通扉が左=助士側なので中央よりやや右寄り)
-        RailKit.AddBox(glass, c + q * new Vector3(0.35f, 1.0f, 0.06f), new Vector3(1.7f, 1.2f, 0.12f), q);
-        // 前面貫通扉(左側、黒。窓付き)
-        RailKit.AddBox(black, c + q * new Vector3(-0.95f, 0.55f, 0.03f), new Vector3(0.75f, 2.9f, 0.28f), q);
-        RailKit.AddBox(glass, c + q * new Vector3(-0.95f, 1.3f, 0.08f), new Vector3(0.58f, 0.7f, 0.1f), q);
+        // 運転席ガラス(**運転席は左**=日本の一般。貫通扉が右なので中央よりやや左寄り)
+        RailKit.AddBox(glass, c + q * new Vector3(-0.35f, 1.0f, 0.06f), new Vector3(1.7f, 1.2f, 0.12f), q);
+        // 前面貫通扉(右側、黒。窓付き)
+        RailKit.AddBox(black, c + q * new Vector3(0.95f, 0.55f, 0.03f), new Vector3(0.75f, 2.9f, 0.28f), q);
+        RailKit.AddBox(glass, c + q * new Vector3(0.95f, 1.3f, 0.08f), new Vector3(0.58f, 0.7f, 0.1f), q);
         // LED灯(窓下左右)
         for (int side = -1; side <= 1; side += 2)
             RailKit.AddBox(lite, c + q * new Vector3(1.0f * side, -0.55f, 0.14f), new Vector3(0.4f, 0.26f, 0.14f), q);
