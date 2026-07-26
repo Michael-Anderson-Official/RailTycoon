@@ -269,6 +269,10 @@ git checkout -- Assets/ && git checkout master && git branch -D review-tmp
 
 ## 直近の変更(新しい順)
 
+- 曲線・分岐の速度制限を追加(`Train.BuildSpeedProfile`)。経路の曲率から各点の上限を
+  求め、後ろ向き走査で「下流の制限へ減速しきれる速度」にする。渡り線は22km/h前後
+  (実物の8番分岐器相当)。直進は制限しない。加速の頭打ちも実車の特性(定トルク域→
+  定出力域)へ直し、0→100km/hが892m→644mになった
 - 駅のホームに人を追加(`StationCrowd`)。視覚専用でシミュレーションには触れない。
   人数は`Station.TotalWaiting`から導出しセーブには何も足さない。GameRandomは使わない。
   距離LOD(近=個別に動く/中=結合メッシュで静止/遠=非表示)で「全員描く」を成立させる

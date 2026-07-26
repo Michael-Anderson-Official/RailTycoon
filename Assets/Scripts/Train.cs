@@ -87,6 +87,7 @@ public class Train : MonoBehaviour
             st.TrackWorldPoint(startTrack, h),
         }, 1);
         cum = RailKit.Cumulative(path);
+        BuildSpeedProfile();
         s = cum[cum.Length - 1];
         PlaceCars();
         state = St.Dwell;
@@ -182,6 +183,7 @@ public class Train : MonoBehaviour
                 }
                 path = BuildMultiLeg(waypoints, HalfTrain);
                 cum = RailKit.Cumulative(path);
+                BuildSpeedProfile();
                 transitCheckpoints = BuildTransitCheckpoints(stations, segs, tracks, path, cum);
                 nextTransitCheckpoint = Mathf.Clamp(spec.passedCheckpoints, 0, transitCheckpoints.Count);
             }
@@ -191,6 +193,7 @@ public class Train : MonoBehaviour
                 int enterSignSingle = seg.SignAt(to);
                 path = BuildLeg(from, spec.departTrack, exitSignSingle, to, curTrack, enterSignSingle, HalfTrain);
                 cum = RailKit.Cumulative(path);
+                BuildSpeedProfile();
                 transitCheckpoints = new List<TransitCheckpoint>();
                 nextTransitCheckpoint = 0;
             }
@@ -216,6 +219,7 @@ public class Train : MonoBehaviour
             int enterSign = seg.SignAt(to);
             path = BuildLeg(from, spec.departTrack, exitSign, to, curTrack, enterSign, HalfTrain);
             cum = RailKit.Cumulative(path);
+            BuildSpeedProfile();
             s = cum[cum.Length - 1];
             v = 0;
             departStation = from;
@@ -237,6 +241,7 @@ public class Train : MonoBehaviour
                 to.TrackWorldPoint(curTrack, h),
             }, 1);
             cum = RailKit.Cumulative(path);
+            BuildSpeedProfile();
             s = cum[cum.Length - 1];
             v = 0;
             departStation = null;
@@ -280,12 +285,17 @@ public class Train : MonoBehaviour
         {
             float total = cum[cum.Length - 1];
             float rem = Mathf.Max(0, total - s);
-            float vAllow = Mathf.Sqrt(2f * fm.type.Decel * rem);
+            // 終端までの減速に加え、途中の曲線・分岐の制限も守る
+            float vAllow = AllowedSpeed();
             float vmax = fm.type.maxSpeedKmh / 3.6f;
-            // 実車の加速は速度が上がると鈍る(定出力域+走行抵抗)。起動加速度に
-            // 1-(v/vmax)^2 を掛けて高速域で頭打ちさせる(低速はキビキビ)
+            // 実車の加速特性。起動から一定速度(定トルク域)までは加速度がほぼ一定で、
+            // そこから定出力域に入って 1/v で鈍り、最後に走行抵抗で最高速度へ漸近する。
+            // 以前は最初から 1-(v/vmax)^2 を掛けていたため低速から鈍りすぎており、
+            // 「最高速度まで全然伸びない」状態だった(2026-07-26にユーザーが指摘)
             float r = vmax > 0.1f ? v / vmax : 0f;
-            float a = fm.type.Accel * Mathf.Max(0.08f, 1f - r * r);
+            float f = r <= BaseSpeedRatio ? 1f : BaseSpeedRatio / Mathf.Max(r, 1e-3f);
+            f *= Mathf.Max(0f, 1f - Mathf.Pow(r, 8f));   // 最高速度付近だけ急に鈍らせる
+            float a = fm.type.Accel * Mathf.Max(0.05f, f);
             v = Mathf.Min(v + a * dt, vmax, vAllow);
             s += v * dt;
             if (!released && s > releaseS)
@@ -402,6 +412,7 @@ public class Train : MonoBehaviour
         }
         path = BuildMultiLeg(waypoints, HalfTrain);
         cum = RailKit.Cumulative(path);
+        BuildSpeedProfile();
         // 経路先頭は列車の尻尾位置。先頭車はそこから編成長ぶん先にいる
         s = HalfTrain * 2f;
         v = 0;
@@ -606,6 +617,7 @@ public class Train : MonoBehaviour
             st.TrackWorldPoint(track, h),
         }, 1);
         cum = RailKit.Cumulative(path);
+        BuildSpeedProfile();
         s = cum[cum.Length - 1];
         v = 0;
         PlaceCars();
@@ -632,6 +644,77 @@ public class Train : MonoBehaviour
     public bool IsDwelling => state == St.Dwell;
     public float DwellRemaining => dwellT;
     public float RouteS => s;
+
+    // ---- 曲線・分岐の速度制限 ----
+    // 経路の曲がり具合から、その地点で出せる速度の上限を作る。
+    // これが無いと渡り線(分岐)を80km/h超で通過してしまう。
+    // この寸法の渡り線(26mで4.6m振る=半径約37m)は実物の8番分岐器相当で、
+    // 制限は22km/h前後になる(実物の8番分岐器も25km/h制限)。
+    // 制限は位置だけの関数なので、速度倍率を変えても結果は変わらない(決定性を保つ)
+    const float LateralAccel = 1.2f;     // 曲線で許す横加速度(m/s²)
+    const int CurvatureSpan = 4;         // 曲率を測る前後の点数(経路は1m間隔)
+    const float MinCurveSpeed = 4.5f;    // 下限(m/s)。これ以下には落とさない
+
+    // 定トルク域の上限(最高速度に対する割合)。ここまでは起動加速度のまま伸びる
+    const float BaseSpeedRatio = 0.5f;
+    float[] speedProfile;                // 各点で出してよい速度(m/s)。下流の制限へ減速しきれる値
+
+    void BuildSpeedProfile()
+    {
+        if (path == null || cum == null || path.Count < 2) { speedProfile = null; return; }
+        int n = path.Count;
+        var prof = new float[n];
+        float vmax = fm.type.maxSpeedKmh / 3.6f;
+
+        // まず各点の曲率から上限を求める
+        for (int i = 0; i < n; i++)
+        {
+            int i0 = Mathf.Max(0, i - CurvatureSpan), i1 = Mathf.Min(n - 1, i + CurvatureSpan);
+            prof[i] = vmax;
+            if (i0 == i || i1 == i) continue;
+            float r = Radius(path[i0], path[i], path[i1]);
+            if (r <= 0f || float.IsInfinity(r)) continue;
+            prof[i] = Mathf.Clamp(Mathf.Sqrt(LateralAccel * r), MinCurveSpeed, vmax);
+        }
+
+        // 後ろ向きに走査して「下流の制限へ減速しきれる速度」にする。
+        // 終端は停止なので0から始める
+        prof[n - 1] = 0f;
+        float decel = fm.type.Decel;
+        for (int i = n - 2; i >= 0; i--)
+        {
+            float ds = Mathf.Max(0.01f, cum[i + 1] - cum[i]);
+            float reachable = Mathf.Sqrt(prof[i + 1] * prof[i + 1] + 2f * decel * ds);
+            prof[i] = Mathf.Min(prof[i], reachable);
+        }
+        speedProfile = prof;
+    }
+
+    // 3点を通る円の半径。ほぼ直線なら正の無限大
+    static float Radius(Vector3 a, Vector3 b, Vector3 c)
+    {
+        float ab = Vector3.Distance(a, b), bc = Vector3.Distance(b, c), ca = Vector3.Distance(c, a);
+        float area2 = Vector3.Cross(b - a, c - a).magnitude;   // 面積の2倍
+        if (area2 < 1e-5f) return float.PositiveInfinity;
+        return ab * bc * ca / (2f * area2);
+    }
+
+    // 現在位置での許容速度
+    float AllowedSpeed()
+    {
+        if (speedProfile == null || cum == null || speedProfile.Length != cum.Length)
+            return Mathf.Sqrt(2f * fm.type.Decel * Mathf.Max(0f, cum[cum.Length - 1] - s));
+        // sに対応する区間を二分探索して線形補間
+        int lo = 0, hi = cum.Length - 1;
+        while (lo + 1 < hi)
+        {
+            int mid = (lo + hi) >> 1;
+            if (cum[mid] <= s) lo = mid; else hi = mid;
+        }
+        float seg = Mathf.Max(0.01f, cum[hi] - cum[lo]);
+        float t = Mathf.Clamp01((s - cum[lo]) / seg);
+        return Mathf.Lerp(speedProfile[lo], speedProfile[hi], t);
+    }
     public bool DepartureTrackReleased => released;
     public int OnboardCount => onboardCount;
     public int DepartureCount { get; private set; }

@@ -170,7 +170,9 @@ public class PlatformEdgeTests
 
         double moneyBefore = GameState.money;
         long carriedBefore = GameState.carried;
-        for (int i = 0; i < 6000 && !(tr.IsDwelling && tr.ArrivalCount > 0); i++) tr.SimTick(Bootstrap.TickSeconds);
+        // 到着するまで回す(上限は保険)。分岐の速度制限を入れてから所要時間が延びたので、
+        // 100秒では届かなくなった
+        for (int i = 0; i < 30000 && !(tr.IsDwelling && tr.ArrivalCount > 0); i++) tr.SimTick(Bootstrap.TickSeconds);
 
         Assert.That(tr.ArrivalCount, Is.EqualTo(1));
         Assert.That(tr.OnboardCount, Is.EqualTo(5), "降車不可なので乗客は車内に残ること");
