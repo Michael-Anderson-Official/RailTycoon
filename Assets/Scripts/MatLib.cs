@@ -8,6 +8,7 @@ public static class MatLib
     static readonly Dictionary<string, Material> cache = new Dictionary<string, Material>();
     static readonly Dictionary<string, Material> tintedCache = new Dictionary<string, Material>();
     static Font font;
+    static Material fontDepth;
 
     public static Material Get(string name)
     {
@@ -39,5 +40,31 @@ public static class MatLib
             if (font == null) font = Resources.Load<Font>("NotoSansJP");
             return font;
         }
+    }
+
+    // TextMeshの既定マテリアル(GUI/Text Shader)は **ZTest Always**。地図の駅名や
+    // 番線番号は手前に出したいのでそれでよいが、実景に置く文字(ホームの駅名標・
+    // 停車位置目標)まで手前の物体を突き抜けて描かれる。運転士目線にしたところ、
+    // 運転台の上に停目の数字が浮いた(2026-07-27)。
+    // 奥行きを見る自前のシェーダ(RailTycoon/TextDepth)に差し替えて使う
+    public static Material JpFontDepth
+    {
+        get
+        {
+            if (fontDepth == null)
+            {
+                fontDepth = new Material(Get("TextDepth")) { name = "JpFontDepth" };
+                // 動的フォントはアトラスを作り直すことがある。作り直されたら差し替える
+                // (放っておくと全ての文字が化ける)
+                Font.textureRebuilt += OnFontTextureRebuilt;
+            }
+            fontDepth.mainTexture = JpFont.material.mainTexture;
+            return fontDepth;
+        }
+    }
+
+    static void OnFontTextureRebuilt(Font f)
+    {
+        if (fontDepth != null && f == JpFont) fontDepth.mainTexture = f.material.mainTexture;
     }
 }

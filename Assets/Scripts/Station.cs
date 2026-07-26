@@ -117,6 +117,8 @@ public class Station : MonoBehaviour
         var lighting = new RailKit.MeshData();
         var furniture = new RailKit.MeshData();
         var signBoard = new RailKit.MeshData();
+        // 停車位置目標は駅名標と別のメッシュに分ける(高さで見分ける必要がなくなる)
+        var stopMarkers = new RailKit.MeshData();
         var glass = new RailKit.MeshData();      // 待合室と駅舎のガラスを共用する
         float platLen = cars * StationLayout.CarLength;
         for (int pi = 0; pi < layout.platforms.Count; pi++)
@@ -419,7 +421,7 @@ public class Station : MonoBehaviour
             RailKit.AddBox(metalwork, new Vector3(houseX + 5.12f, 2.15f, mullion * 1.35f),
                 new Vector3(0.1f, 3.0f, 0.1f), Quaternion.identity);
 
-        AddStopMarkers(metalwork, signBoard);
+        AddStopMarkers(metalwork, stopMarkers);
 
         // 高架駅は桁と橋脚で地面まで支える。ローカルy=0がレール基面なので、
         // 桁はその直下、橋脚はさらに地面(ローカルy=-Height)まで下ろす
@@ -442,6 +444,7 @@ public class Station : MonoBehaviour
         RailKit.MeshGO("Lighting", lighting.ToMesh(), MatLib.Get("StationHouse"), transform);
         RailKit.MeshGO("Furniture", furniture.ToMesh(), MatLib.Get("Tie"), transform);
         RailKit.MeshGO("StationSigns", signBoard.ToMesh(), MatLib.Get("Canopy"), transform);
+        RailKit.MeshGO("StopMarkers", stopMarkers.ToMesh(), MatLib.Get("Canopy"), transform);
         RailKit.MeshGO("House", house.ToMesh(), MatLib.Get("StationHouse"), transform);
         RailKit.MeshGO("Glass", glass.ToMesh(), MatLib.Get("BuildingHigh"), transform);
 
@@ -483,7 +486,8 @@ public class Station : MonoBehaviour
         tm.anchor = TextAnchor.MiddleCenter;
         tm.alignment = TextAlignment.Center;
         tm.color = Color.white;
-        go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
+        // 実景に置く文字なので、手前の物体に隠れること(既定は突き抜ける)
+        go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFontDepth;
         stationSigns.Add(tm);
     }
 
@@ -701,9 +705,15 @@ public class Station : MonoBehaviour
     // そのため実物の低い停止位置目標と同じく、低く・線路寄りに置く
     // 横方向は2つの制約の間に収める必要がある。内側=レールへ重ねない(板の内端が
     // 軌間の外)、外側=縦画面の車窓の横画角(約30°)から外さない
-    const float MarkerLateral = 1.00f;   // 線路中心から(車体の下に収まる)
+    // 標識の位置。**運転台を実車どおりに作り込んだら、線路際の低い標識は
+    // コンソールの陰に入って停車時に見えなくなった**(2026-07-27)。
+    // 実物の停止位置目標と同じく、車体の外側に立てた柱の上、運転士の目の高さ
+    // あたりに掲げる。こうすると停車しても運転台の上に残る。
+    // 柱は車体断面(半幅1.4m)の外へ出すこと。停まらずに通過する長い編成や、
+    // 自分より長い編成の停止位置を通り越す列車がぶつかる
+    const float MarkerLateral = 1.75f;   // 線路中心から(車体の外側)
     const float MarkerPlateW = 0.34f;    // 板の幅
-    const float MarkerPlateY = 0.55f;    // 標識板の中心高さ(レール面から)
+    public const float MarkerPlateY = 2.25f;   // 標識板の中心高さ(レール面から)
     // 停止時の鼻先から標識までの距離。実機(402×874)の車窓へ投影して測った値。
     // **車窓でも下部ナビ(運行/線路/駅/系統/車窓)が画面下端を覆う**ので、
     // キャンバスの下端ではなくナビの上端(画面高の9.9%)より上に出す必要がある。
@@ -758,7 +768,9 @@ public class Station : MonoBehaviour
         tm.anchor = TextAnchor.MiddleCenter;
         tm.alignment = TextAlignment.Center;
         tm.color = Color.white;
-        go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFont.material;
+        // 実景に置く文字なので、手前の物体に隠れること。既定のTextMeshマテリアルは
+        // 突き抜けるため、運転士目線では運転台の上に数字が浮いていた
+        go.GetComponent<MeshRenderer>().sharedMaterial = MatLib.JpFontDepth;
     }
 
     // この駅に停まれる編成の両数(重複を除く)

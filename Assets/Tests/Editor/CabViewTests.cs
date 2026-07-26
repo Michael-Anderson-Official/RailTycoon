@@ -116,6 +116,52 @@ public class CabViewTests
     }
 
     [Test]
+    public void Instruments_SitInFrontOfTheTiltedPodFace()
+    {
+        // 表示器ユニットの面は手前へ傾いている。計器を「z方向へ少し手前」に
+        // ずらすだけだと、高い位置ほど筐体の中に沈んで見えなくなる
+        // (2026-07-27、速度計だけが映らなかった原因)
+        foreach (float h in new[] { -TrainCab.PodHeight * 0.5f, 0f, TrainCab.PodHeight * 0.5f })
+        {
+            var p = TrainCab.PodPoint(0f, h, TrainCab.PodFaceOffset);
+            float outward = Vector3.Dot(p - TrainCab.PodCentre(0f), TrainCab.PodOutward);
+            Assert.That(outward, Is.GreaterThan(TrainCab.PodHalfDepth),
+                "高さ" + h.ToString("F2") + "でも筐体の面より手前に出ること(実測" +
+                outward.ToString("F3") + "m / 面まで" + TrainCab.PodHalfDepth + "m)");
+        }
+    }
+
+    [Test]
+    public void Console_LeavesTheViewAheadOpen()
+    {
+        // 運転台が高いと前方が見えない。縦画面の垂直画角は60°しかないので、
+        // コンソールの上端は目線から見て十分下(=遠くの線路が見える角度)に
+        // 収まっていること
+        var train = Make(0, out _, out _);
+        Transform body = null;
+        foreach (Transform car in train.transform) if (car.name == "Car0") { body = car; break; }
+
+        var b = new Bounds();
+        bool any = false;
+        foreach (string part in new[] { "CabPanel", "CabPod", "CabScreen", "CabMetal" })
+        {
+            var mf = body.Find(part)?.GetComponent<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) continue;
+            if (!any) { b = mf.sharedMesh.bounds; any = true; }
+            else b.Encapsulate(mf.sharedMesh.bounds);
+        }
+        Assert.That(any, Is.True, "運転台の部品が作られていること(テスト前提)");
+
+        // 最悪の組み合わせ(いちばん高く、いちばん遠い点)で見込む俯角
+        float drop = TrainCab.EyeY - b.max.y;
+        float ahead = b.max.z - TrainCab.EyeZ;
+        Assert.That(drop, Is.GreaterThan(0f), "コンソールが目線より下にあること");
+        float deg = Mathf.Atan2(drop, ahead) * Mathf.Rad2Deg;
+        Assert.That(deg, Is.GreaterThan(7f),
+            "コンソールの上端が目線から7°以上下にあること(実測" + deg.ToString("F1") + "°)");
+    }
+
+    [Test]
     public void Windscreen_IsRemovedButTheFrameStaysWhileRidingTheCab()
     {
         // 「窓越し」にするため、外すのはガラスだけ。枠(Face)は残す

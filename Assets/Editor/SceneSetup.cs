@@ -96,6 +96,7 @@ public static class SceneSetup
         CarrierMat("UIDefault", "UI/Default");
         CarrierMat("TextShader", "GUI/Text Shader");
         CarrierMat("SpritesDefault", "Sprites/Default");
+        CarrierMat("TextDepth", "RailTycoon/TextDepth");
         AssetDatabase.SaveAssets();
     }
 
