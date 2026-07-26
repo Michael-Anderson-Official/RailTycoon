@@ -88,6 +88,40 @@ public class ElevatedStationTests
     }
 
     [Test]
+    public void ViaductDeck_NarrowsWithTheTracksTowardTheThroat()
+    {
+        // スロート端では線路が中心へ収束している。桁を駅の全幅のまま伸ばすと、
+        // 車止めの先まで何も載っていない板が突き出して見える
+        var st = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 8, 1, 2, "高架", level: 1);
+        var verts = st.transform.Find("Viaduct").GetComponent<MeshFilter>().sharedMesh.vertices;
+        float H = st.HalfLen, T = StationLayout.ThroatLen;
+
+        float atStation = DeckWidthNear(verts, -H);
+        float atThroat = DeckWidthNear(verts, -(H + T));
+        Assert.That(atStation, Is.GreaterThan(st.layout.totalWidth),
+            "ホーム部の桁は構内幅より広いこと");
+        Assert.That(atThroat, Is.LessThan(atStation - 3f),
+            "スロート端へ向けて絞られること(駅端" + atStation.ToString("F1") +
+            "m → スロート端" + atThroat.ToString("F1") + "m)");
+        Assert.That(atThroat,
+            Is.EqualTo(TrackSegment.HalfCorridorWidth * 2f).Within(0.3f),
+            "駅間の桁と同じ幅で終わること(接合部に段差を作らない)");
+    }
+
+    // z付近にある桁(橋脚を除く)の横幅
+    static float DeckWidthNear(Vector3[] verts, float z)
+    {
+        float mn = float.MaxValue, mx = float.MinValue;
+        foreach (var p in verts)
+        {
+            if (Mathf.Abs(p.z - z) > 1.5f) continue;
+            if (p.y < -RailDimensions.ViaductDeckThickness - 0.05f) continue;
+            mn = Mathf.Min(mn, p.x); mx = Mathf.Max(mx, p.x);
+        }
+        return mn > mx ? 0f : mx - mn;
+    }
+
+    [Test]
     public void GroundStation_HasNoViaduct()
     {
         var st = EditModeTestHelpers.MakeStation(Vector3.zero, 0, 6, 2, 2, "地上");

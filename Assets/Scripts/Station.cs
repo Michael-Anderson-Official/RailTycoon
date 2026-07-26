@@ -101,6 +101,7 @@ public class Station : MonoBehaviour
         var lighting = new RailKit.MeshData();
         var furniture = new RailKit.MeshData();
         var signBoard = new RailKit.MeshData();
+        var glass = new RailKit.MeshData();      // 待合室と駅舎のガラスを共用する
         float platLen = cars * StationLayout.CarLength;
         for (int pi = 0; pi < layout.platforms.Count; pi++)
         {
@@ -136,6 +137,7 @@ public class Station : MonoBehaviour
                     AddTaperedApron(platformSurface, p.x, z0, z1,
                         visualW * 0.5f - 0.02f, tipHalfW - 0.02f,
                         RailDimensions.PlatformTop - surfaceThick, RailDimensions.PlatformTop);
+                    AddApronFence(metalwork, p.x, z0, z1, visualW * 0.5f, tipHalfW);
                 }
             }
 
@@ -174,36 +176,175 @@ public class Station : MonoBehaviour
                 new Vector3(halfRoofW + 0.18f, 0.18f, coveredLen),
                 Quaternion.Euler(0, 0, -roofAngle));
 
+            // 折板屋根のリブと棟包み。俯瞰では上屋がホームをほぼ覆うので、
+            // 屋根が単なる平板に見えないようここを作り込むと効果が大きい
+            var rotL = Quaternion.Euler(0, 0, roofAngle);
+            var rotR = Quaternion.Euler(0, 0, -roofAngle);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                var rot = side < 0 ? rotL : rotR;
+                Vector3 slabC = new Vector3(p.x + side * roofW * 0.25f, roofY, 0);
+                for (int i = -2; i <= 2; i++)
+                    RailKit.AddBox(canopyRoof,
+                        slabC + rot * new Vector3(i * (halfRoofW / 5f), 0.13f, 0),
+                        new Vector3(0.09f, 0.10f, coveredLen), rot);
+            }
+            RailKit.AddBox(canopyRoof, new Vector3(p.x, roofY + rise * 0.5f + 0.06f, 0),
+                new Vector3(0.46f, 0.16f, coveredLen), Quaternion.identity);
+
+            // 上屋の妻面(端部の三角壁)と軒の雨樋。上屋が宙に浮いて見えるのを防ぐ
+            for (int endSign = -1; endSign <= 1; endSign += 2)
+            {
+                float gz = endSign * coveredLen * 0.5f;
+                RailKit.AddBox(canopyRoof, new Vector3(p.x, roofY - rise * 0.35f, gz),
+                    new Vector3(roofW * 0.62f, rise * 1.5f, 0.12f), Quaternion.identity);
+            }
+            for (int sx = -1; sx <= 1; sx += 2)
+                RailKit.AddBox(metalwork,
+                    new Vector3(p.x + sx * (halfRoofW + 0.14f), roofY - rise * 0.55f, 0),
+                    new Vector3(0.14f, 0.16f, coveredLen), Quaternion.identity);
+
+            // 柱は実物と同じく細かい間隔で立てる(以前は18m間隔で骨組みが疎に見えた)。
+            // 各柱に方杖(斜めの補強材)を入れて鋼製上屋らしくする
             float postMin = -coveredLen * 0.5f + 3f;
             float postMax = coveredLen * 0.5f - 3f;
-            for (float z = postMin; z <= postMax + 0.01f; z += 18f)
+            float postH = beamY - RailDimensions.PlatformTop;
+            int lightEvery = 0;
+            for (float z = postMin; z <= postMax + 0.01f; z += 9f)
             {
                 RailKit.AddBox(metalwork,
                     new Vector3(p.x, (RailDimensions.PlatformTop + beamY) * 0.5f, z),
-                    new Vector3(0.22f, beamY - RailDimensions.PlatformTop, 0.22f),
-                    Quaternion.identity);
+                    new Vector3(0.22f, postH, 0.22f), Quaternion.identity);
                 RailKit.AddBox(metalwork, new Vector3(p.x, beamY, z),
                     new Vector3(roofW - 0.35f, 0.16f, 0.24f), Quaternion.identity);
-                RailKit.AddBox(lighting, new Vector3(p.x, beamY - 0.16f, z + 4.5f),
-                    new Vector3(1.25f, 0.08f, 0.34f), Quaternion.identity);
+                // 方杖。俯瞰ではほとんど見えないので柱1本おきに留める
+                if (lightEvery % 2 == 0)
+                    for (int sx = -1; sx <= 1; sx += 2)
+                        RailKit.AddBox(metalwork,
+                            new Vector3(p.x + sx * roofW * 0.16f, beamY - 0.42f, z),
+                            new Vector3(0.1f, 1.15f, 0.1f), Quaternion.Euler(0, 0, sx * 38f));
+                // 照明は柱2本おき(実物も柱ごとには付かない)
+                if (lightEvery++ % 2 == 0)
+                    RailKit.AddBox(lighting, new Vector3(p.x, beamY - 0.16f, z + 4.5f),
+                        new Vector3(1.25f, 0.08f, 0.34f), Quaternion.identity);
             }
 
-            // ホーム中央のベンチ。線路側の動線を塞がないよう柱の近くへ寄せる。
-            float[] benchZ = { -platLen * 0.18f, platLen * 0.18f };
-            foreach (float z in benchZ)
+            // 設備を置ける横方向。線路に面している側には出さない(点字ブロック・
+            // 警戒線の帯より内側に収める)。島式(両側が線路)は中央へ寄せる
+            float bandInset = 1.35f;                       // 縁から帯を避けるのに要る幅
+            float freeHalf = visualW * 0.5f - bandInset;
+            // 片側だけが線路なら反対側へ、島式なら中央へ
+            float furnX = p.x + FurnitureAwayDirection(layout, pi)
+                * Mathf.Max(0f, freeHalf - 0.8f) * 0.5f;
+            float top = RailDimensions.PlatformTop;
+
+            // ベンチを等間隔に並べる(以前は中央付近に2脚だけだった)
+            if (freeHalf > 0.7f)
             {
-                RailKit.AddBox(furniture,
-                    new Vector3(p.x + 0.75f, RailDimensions.PlatformTop + 0.40f, z),
-                    new Vector3(0.62f, 0.14f, 3.2f), Quaternion.identity);
-                RailKit.AddBox(furniture,
-                    new Vector3(p.x + 1.02f, RailDimensions.PlatformTop + 0.77f, z),
-                    new Vector3(0.12f, 0.75f, 3.2f), Quaternion.identity);
-                RailKit.AddBox(metalwork,
-                    new Vector3(p.x + 0.75f, RailDimensions.PlatformTop + 0.17f, z - 1.1f),
-                    new Vector3(0.12f, 0.48f, 0.12f), Quaternion.identity);
-                RailKit.AddBox(metalwork,
-                    new Vector3(p.x + 0.75f, RailDimensions.PlatformTop + 0.17f, z + 1.1f),
-                    new Vector3(0.12f, 0.48f, 0.12f), Quaternion.identity);
+                int benchCount = Mathf.Clamp(Mathf.FloorToInt(platLen / 26f), 2, 8);
+                for (int bi = 0; bi < benchCount; bi++)
+                {
+                    float z = Mathf.Lerp(-platLen * 0.36f, platLen * 0.36f,
+                        benchCount == 1 ? 0.5f : bi / (float)(benchCount - 1));
+                    RailKit.AddBox(furniture, new Vector3(furnX, top + 0.40f, z),
+                        new Vector3(0.62f, 0.14f, 3.2f), Quaternion.identity);
+                    RailKit.AddBox(furniture, new Vector3(furnX + 0.27f, top + 0.77f, z),
+                        new Vector3(0.12f, 0.75f, 3.2f), Quaternion.identity);
+                    for (int sz = -1; sz <= 1; sz += 2)
+                        RailKit.AddBox(metalwork,
+                            new Vector3(furnX, top + 0.17f, z + sz * 1.1f),
+                            new Vector3(0.12f, 0.48f, 0.12f), Quaternion.identity);
+                }
+            }
+
+            // 自動販売機とごみ箱。ホームの1/4付近へ1組ずつ
+            if (freeHalf > 1.0f)
+                for (int sz = -1; sz <= 1; sz += 2)
+                {
+                    float z = sz * platLen * 0.27f;
+                    RailKit.AddBox(furniture, new Vector3(furnX, top + 0.92f, z),
+                        new Vector3(0.78f, 1.84f, 1.05f), Quaternion.identity);
+                    RailKit.AddBox(furniture, new Vector3(furnX, top + 0.42f, z + sz * 1.9f),
+                        new Vector3(0.56f, 0.84f, 0.62f), Quaternion.identity);
+                }
+
+            // 待合室とエレベーター塔。上屋が覆わない範囲(±0.42*platLen)へ置くので
+            // 俯瞰でも見え、のっぺりしたホームに立体的な変化が出る
+            if (freeHalf > 1.3f && platLen > 90f)
+            {
+                // 待合室。中実の箱をガラスで包むと中身の壁が見えたままになるので、
+                // 床・天井の帯と四隅の柱だけを実体にし、壁はガラス板で張る
+                // (実装後レビューでCodex CLIが指摘)
+                float wz = platLen * 0.42f;
+                float ww = Mathf.Min(2.6f, freeHalf * 1.6f);
+                const float wl = 4.2f, wh = 2.5f;
+                RailKit.AddBox(metalwork, new Vector3(furnX, top + 0.07f, wz),
+                    new Vector3(ww, 0.14f, wl), Quaternion.identity);
+                RailKit.AddBox(metalwork, new Vector3(furnX, top + wh, wz),
+                    new Vector3(ww, 0.16f, wl), Quaternion.identity);
+                for (int cx = -1; cx <= 1; cx += 2)
+                    for (int cz = -1; cz <= 1; cz += 2)
+                        RailKit.AddBox(metalwork,
+                            new Vector3(furnX + cx * (ww * 0.5f - 0.06f), top + wh * 0.5f,
+                                wz + cz * (wl * 0.5f - 0.06f)),
+                            new Vector3(0.12f, wh, 0.12f), Quaternion.identity);
+                // 側面2枚と奥の妻面。手前は出入口として開けておく
+                for (int cx = -1; cx <= 1; cx += 2)
+                    RailKit.AddBox(glass,
+                        new Vector3(furnX + cx * ww * 0.5f, top + wh * 0.5f, wz),
+                        new Vector3(0.05f, wh - 0.3f, wl - 0.2f), Quaternion.identity);
+                RailKit.AddBox(glass, new Vector3(furnX, top + wh * 0.5f, wz + wl * 0.5f),
+                    new Vector3(ww - 0.2f, wh - 0.3f, 0.05f), Quaternion.identity);
+                RailKit.AddBox(canopyRoof, new Vector3(furnX, top + wh + 0.18f, wz),
+                    new Vector3(ww + 0.4f, 0.16f, wl + 0.4f), Quaternion.identity);
+
+                // エレベーター塔。昇降路は中実のままにし、ガラスは面に張る窓とする
+                float ez = -platLen * 0.42f;
+                float ew = Mathf.Min(2.4f, freeHalf * 1.5f);
+                RailKit.AddBox(metalwork, new Vector3(furnX, top + 2.05f, ez),
+                    new Vector3(ew, 4.1f, ew), Quaternion.identity);
+                for (int cz = -1; cz <= 1; cz += 2)
+                    RailKit.AddBox(glass,
+                        new Vector3(furnX, top + 1.9f, ez + cz * (ew * 0.5f + 0.03f)),
+                        new Vector3(ew * 0.62f, 2.4f, 0.05f), Quaternion.identity);
+                RailKit.AddBox(canopyRoof, new Vector3(furnX, top + 4.22f, ez),
+                    new Vector3(ew + 0.35f, 0.16f, ew + 0.35f), Quaternion.identity);
+            }
+
+            // 上屋の外は暗くなるので照明ポールを立てる
+            for (int sz = -1; sz <= 1; sz += 2)
+            {
+                float lz = sz * platLen * 0.46f;
+                RailKit.AddBox(metalwork, new Vector3(p.x, top + 1.85f, lz),
+                    new Vector3(0.12f, 3.7f, 0.12f), Quaternion.identity);
+                RailKit.AddBox(lighting, new Vector3(p.x, top + 3.66f, lz),
+                    new Vector3(0.62f, 0.1f, 0.3f), Quaternion.identity);
+            }
+
+            // 階段(コンコースへの昇降口)。上屋の下、ホーム中央付近に置く。
+            // 実際に床を抜くのではなく、昇降口の壁と手すりで表現する
+            if (freeHalf > 1.2f && platLen > 60f)
+            {
+                float stairHalfW = Mathf.Min(1.7f, freeHalf * 0.85f);
+                const float stairHalfLen = 5.2f;
+                float wallY = top + 0.55f;
+                for (int sx = -1; sx <= 1; sx += 2)
+                    RailKit.AddBox(metalwork,
+                        new Vector3(furnX + sx * stairHalfW, wallY, 0),
+                        new Vector3(0.16f, 1.1f, stairHalfLen * 2f), Quaternion.identity);
+                RailKit.AddBox(metalwork, new Vector3(furnX, wallY, -stairHalfLen),
+                    new Vector3(stairHalfW * 2f, 1.1f, 0.16f), Quaternion.identity);
+                // ホーム面は不透明な一枚板なので、その下へ段板を描いても見えない
+                // (実装後レビューでCodex CLIが指摘)。開口を面のすぐ上に濃い板で表し、
+                // その上に段鼻を並べて「下りていく階段」に見せる
+                RailKit.AddBox(metalwork, new Vector3(furnX, top + 0.012f, 0f),
+                    new Vector3(stairHalfW * 1.9f, 0.02f, stairHalfLen * 1.8f),
+                    Quaternion.identity);
+                for (int si = 0; si < 7; si++)
+                    RailKit.AddBox(tactile,
+                        new Vector3(furnX, top + 0.03f,
+                            Mathf.Lerp(-stairHalfLen + 0.7f, stairHalfLen - 0.7f, si / 6f)),
+                        new Vector3(stairHalfW * 1.9f, 0.02f, 0.16f), Quaternion.identity);
             }
 
             // ホーム端の転落防止柵。長手方向の線路側は列車に開放したままにする。
@@ -232,11 +373,27 @@ public class Station : MonoBehaviour
                 CreateStationSignText(pi, si, -1, new Vector3(p.x - 0.08f, signY, signZ));
                 CreateStationSignText(pi, si, 1, new Vector3(p.x + 0.08f, signY, signZ));
             }
+
+            // 上屋から吊り下げる番線標。実物と同じく乗車位置の目印になるよう
+            // 上屋の範囲の両端寄りへ、線路に面している側だけに出す
+            foreach (var e in layout.edges)
+            {
+                if (e.platformIndex != pi) continue;
+                // 線路は -e.side 側。番線標は線路側の縁寄りに吊る
+                float hangX = p.x - e.side * Mathf.Min(1.0f, visualW * 0.5f - 0.5f);
+                for (int hi = -1; hi <= 1; hi += 2)
+                {
+                    float hz = hi * coveredLen * 0.3f;
+                    RailKit.AddBox(metalwork, new Vector3(hangX, beamY - 0.34f, hz),
+                        new Vector3(0.06f, 0.52f, 0.06f), Quaternion.identity);
+                    RailKit.AddBox(signBoard, new Vector3(hangX, beamY - 0.72f, hz),
+                        new Vector3(0.05f, 0.34f, 1.15f), Quaternion.identity);
+                }
+            }
         }
 
         // 駅舎は壁・庇・ガラス出入口・方立を分け、単なる箱に見えないようにする。
         var house = new RailKit.MeshData();
-        var glass = new RailKit.MeshData();
         float houseX = layout.totalWidth * 0.5f + 6.5f;
         RailKit.AddBox(house, new Vector3(houseX, 2.35f, 0), new Vector3(10f, 4.7f, 8.5f), Quaternion.identity);
         RailKit.AddBox(canopyRoof, new Vector3(houseX, 4.78f, 0), new Vector3(11.2f, 0.28f, 9.5f), Quaternion.identity);
@@ -464,12 +621,19 @@ public class Station : MonoBehaviour
     {
         float deck = RailDimensions.ViaductDeckThickness;
         float drop = Height;                       // レール基面から地面までの落差
-        float len = (H + T) * 2f;                  // スロート端から端まで
         float w = layout.totalWidth + 2f;          // 構内幅より少し広く張り出す
+        float halfW = w * 0.5f;
+        // スロート端では線路が中心へ収束しているので、桁もそこまで絞る。
+        // 全幅のまま伸ばすと、車止めの先まで何も載っていない板が突き出して見える
+        // 駅間の桁(TrackSegment.AddViaduct)と同じ幅にして、接合部に段差を出さない
+        float tipHalf = Mathf.Min(halfW, TrackSegment.HalfCorridorWidth);
 
-        // 桁(レール基面のすぐ下)
+        // ホーム部は全幅
         RailKit.AddBox(md, new Vector3(0f, -deck * 0.5f, 0f),
-            new Vector3(w, deck, len), Quaternion.identity);
+            new Vector3(w, deck, H * 2f), Quaternion.identity);
+        // スロート部は線路の収束に合わせて絞る
+        for (int s = -1; s <= 1; s += 2)
+            AddTaperedApron(md, 0f, s * H, s * (H + T), halfW, tipHalf, -deck, 0f);
 
         // 橋脚。地上へ届かない高さ(level==0)なら不要
         float pierTop = -deck;
@@ -477,15 +641,74 @@ public class Station : MonoBehaviour
         float pierH = pierTop - pierBottom;
         if (pierH <= 0.1f) return;
         float pw = RailDimensions.ViaductPierWidth;
-        float px = Mathf.Max(pw, w * 0.5f - 2f);
-        int rows = Mathf.Max(2, Mathf.CeilToInt(len / RailDimensions.ViaductPierSpacing));
+        float end = H + T;
+        int rows = Mathf.Max(2, Mathf.CeilToInt(end * 2f / RailDimensions.ViaductPierSpacing));
         for (int i = 0; i <= rows; i++)
         {
-            float z = Mathf.Lerp(-len * 0.5f + pw, len * 0.5f - pw, i / (float)rows);
+            float z = Mathf.Lerp(-end + pw, end - pw, i / (float)rows);
+            // その位置での桁の幅に合わせて橋脚を内側へ寄せる(桁から食み出させない)
+            float local = Mathf.Abs(z) <= H
+                ? halfW
+                : Mathf.Lerp(halfW, tipHalf, (Mathf.Abs(z) - H) / Mathf.Max(0.01f, T));
+            float px = Mathf.Max(pw * 0.5f, local - 2f);
             for (int sx = -1; sx <= 1; sx += 2)
                 RailKit.AddBox(md, new Vector3(sx * px, pierBottom + pierH * 0.5f, z),
                     new Vector3(pw, pierH, pw), Quaternion.identity);
         }
+    }
+
+    // ベンチ・待合室などの設備を線路から逃がす向き(ホームローカルのx)。
+    // ホーム縁は centerX - side*幅/2 にあるので、**線路は -side 側**にある。
+    // つまり逃がす向きは +side。符号を取り違えると設備が線路側へ寄ってしまう
+    // (実装後レビューでCodex CLIが指摘)。両側が線路の島式は0(中央のまま)。
+    // Mathf.Signは0に対して1を返すので、島式をそれで判定してはいけない
+    public static int FurnitureAwayDirection(StationLayout.Result layout, int platformIndex)
+    {
+        int sum = 0;
+        foreach (var e in layout.edges) if (e.platformIndex == platformIndex) sum += e.side;
+        return sum == 0 ? 0 : (sum > 0 ? 1 : -1);
+    }
+
+    // 絞ったホーム端を囲む柵。実物のホーム端は必ず柵で囲われており、
+    // 白い斜路が剥き出しのままだと模型のように見えてしまう。
+    // 柵はホーム縁より内側に置き、線路側へは張り出させない
+    static void AddApronFence(RailKit.MeshData md, float centerX, float z0, float z1,
+        float halfW0, float halfW1)
+    {
+        const int steps = 4;
+        float top = RailDimensions.PlatformTop;
+        var prev = new Vector3[2];
+        for (int s = 0; s <= steps; s++)
+        {
+            float t = s / (float)steps;
+            float z = Mathf.Lerp(z0, z1, t);
+            float hw = Mathf.Lerp(halfW0, halfW1, t) - 0.14f;
+            for (int i = 0; i < 2; i++)
+            {
+                float x = centerX + (i == 0 ? -hw : hw);
+                var pt = new Vector3(x, 0f, z);
+                RailKit.AddBox(md, new Vector3(x, top + 0.62f, z),
+                    new Vector3(0.1f, 1.15f, 0.1f), Quaternion.identity);
+                if (s > 0)
+                {
+                    // 前の柱との間に手すり2段。絞りに沿って斜めになる
+                    Vector3 mid = (prev[i] + pt) * 0.5f;
+                    Vector3 d = pt - prev[i];
+                    float len = new Vector2(d.x, d.z).magnitude;
+                    var rot = Quaternion.Euler(0, Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg, 0);
+                    for (int rail = 0; rail < 2; rail++)
+                        RailKit.AddBox(md,
+                            new Vector3(mid.x, top + 0.55f + rail * 0.5f, mid.z),
+                            new Vector3(0.07f, 0.08f, len), rot);
+                }
+                prev[i] = pt;
+            }
+        }
+        // 先端を塞ぐ手すり
+        float tipHw = halfW1 - 0.14f;
+        for (int rail = 0; rail < 2; rail++)
+            RailKit.AddBox(md, new Vector3(centerX, top + 0.55f + rail * 0.5f, z1),
+                new Vector3(tipHw * 2f, 0.08f, 0.07f), Quaternion.identity);
     }
 
     // ホーム端の絞り(z0側が全幅halfW0、z1側が細いhalfW1)。yBottom..yTopの角柱を

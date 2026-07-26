@@ -334,6 +334,18 @@ public class BuildController : MonoBehaviour
         string tooSteep = DescribeGradeViolation(st, newLevel, cars);
         if (tooSteep != null) { UIController.Toast(tooSteep); return false; }
 
+        // 短くする建て替えは、その駅を使う編成が収まる範囲までしか許さない。
+        // DispatchTrainは配車の瞬間しか両数を見ないため、ここを開けておくと
+        // 10両編成が停まっている駅を2両対応へ縮められ、列車がホームを突き抜ける
+        if (cars < st.cars)
+            foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+            {
+                if (t.fm == null || !t.RouteHas(st) || t.fm.cars <= cars) continue;
+                UIController.Toast(t.fm.Label + "が使用中のため" + cars +
+                    "両対応へは縮められません(先に列車を撤去してください)");
+                return false;
+            }
+
         double oldCost = GameState.StationCost(st.cars, st.faces, st.lines, st.level);
         double newCost = GameState.StationCost(cars, faces, lines, newLevel);
         double delta = newCost - oldCost;
