@@ -226,6 +226,56 @@ public class StationRebuildResyncTests
     }
 
     [Test]
+    public void RemovingATransitStation_RefundsEachTrainExactlyOnce()
+    {
+        // 撤去した列車を再度拾って払い戻しを二重計上しないこと。
+        // プレイ中のDestroyは遅延するのでFindObjectsByTypeでは撤去済みが混じる。
+        // 台帳(TrackNetwork.trains)を見ることで防いでいる
+        // (実装後レビューでCodex CLIが指摘)
+        var (bc, a, b, c, train) = Setup(2, 2);
+        try
+        {
+            for (int t = 0; t < 1200; t++) { train.SimTick(Bootstrap.TickSeconds); train.PlaceCars(); }
+            double refundPerTrain = train.RefundValue;
+            double stationRefund = GameState.StationCost(b.cars, b.faces, b.lines, b.level) * 0.5;
+            double before = GameState.money;
+
+            bc.RemoveStation(b);
+
+            double gained = GameState.money - before;
+            // 駅+線路2本+列車1本ぶん。列車ぶんが2回入っていないことを見る
+            Assert.That(gained, Is.GreaterThan(stationRefund + refundPerTrain * 0.9),
+                "列車ぶんの払い戻しが計上されること");
+            Assert.That(gained, Is.LessThan(stationRefund + refundPerTrain * 1.9 + 50e8),
+                "列車ぶんの払い戻しが二重に入っていないこと(実際" +
+                (gained / 1e8).ToString("F1") + "億円)");
+            Assert.That(TrackNetwork.trains.Count, Is.EqualTo(0), "列車が残らないこと");
+        }
+        finally { Object.DestroyImmediate(bc.gameObject); }
+    }
+
+    [Test]
+    public void RemovingASegment_DoesNotLeaveReservationsFromDeletedTrains()
+    {
+        // 撤去済みの列車を再同期すると、消える直前に番線を予約し直して漏れる
+        var (bc, a, b, c, train) = Setup(2, 2);
+        try
+        {
+            for (int t = 0; t < 1200; t++) { train.SimTick(Bootstrap.TickSeconds); train.PlaceCars(); }
+            var seg = TrackNetwork.Find(a, b);
+            Assert.That(seg, Is.Not.Null);
+            bc.RemoveSegment(seg);
+
+            Assert.That(TrackNetwork.trains.Count, Is.EqualTo(0), "走れなくなった列車が畳まれること");
+            foreach (var st in new[] { a, b, c })
+                foreach (bool occ in st.occupied)
+                    Assert.That(occ, Is.False,
+                        st.stationName + "に予約が残らないこと");
+        }
+        finally { Object.DestroyImmediate(bc.gameObject); }
+    }
+
+    [Test]
     public void RebuildingAStationTheTrainStopsAt_StillWorks()
     {
         // 既存の挙動(停車駅の建て替え)が壊れていないこと

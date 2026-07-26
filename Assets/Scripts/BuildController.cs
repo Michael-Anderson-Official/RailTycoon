@@ -481,9 +481,13 @@ public class BuildController : MonoBehaviour
             return true;
         }
         var deadLines = Services.lines.FindAll(l => !StillRunnable(l.route));
-        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
+        // **FindObjectsByTypeではなく台帳を見る**。プレイ中のDestroyは遅延するので、
+        // 上のループで撤去した列車がまだ見つかってしまい、払い戻しと撤去本数を
+        // 二重に計上する(実装後レビューでCodex CLIが指摘)。
+        // TrackNetwork.trainsは撤去時に即座に外れるため、これが正しい判断材料になる
+        foreach (var t in new List<Train>(TrackNetwork.trains))
         {
-            if (t.route == null) continue;
+            if (t == null || t.route == null) continue;
             bool dead = !StillRunnable(t.route)
                 || (t.lineIds != null && t.lineIds.Exists(id => deadLines.Exists(l => l.id == id)));
             if (!dead) continue;
@@ -553,9 +557,12 @@ public class BuildController : MonoBehaviour
         selLines.RemoveAll(l => !Services.lines.Contains(l));
 
         // 組み直すのは、撤去した線路を実際に掴んでいた列車だけにする。
-        // 無関係な列車まで組み直すと走行中の位置・速度が失われてダイヤが乱れる
-        foreach (var t in FindObjectsByType<Train>(FindObjectsSortMode.None))
-            if (t.HoldsSegment(seg)) t.ResyncToNetwork();
+        // 無関係な列車まで組み直すと走行中の位置・速度が失われてダイヤが乱れる。
+        // ここも台帳を見る。プレイ中のDestroyは遅延するため、上で撤去したばかりの
+        // 列車をFindObjectsByTypeが拾ってしまい、消える直前に番線を予約し直して
+        // 予約が漏れる(実装後レビューでCodex CLIが指摘した二重計上と同じ原因)
+        foreach (var t in new List<Train>(TrackNetwork.trains))
+            if (t != null && t.HoldsSegment(seg)) t.ResyncToNetwork();
 
         // 端が空いたので頭端(車止め)へ戻す
         if (a != null) a.RebuildTrackVisual();
