@@ -391,6 +391,7 @@ public class Train : MonoBehaviour
 
         int boarded = Board(cur);
         cur.OnDeparture(boarded);
+        cur.NotifyBoarded(curTrack, boarded);   // 見た目だけ(人をドアへ歩かせる)
 
         var waypoints = new List<(Station st, int track, int enterSign, int exitSign)>(n);
         for (int i = 0; i < n; i++)
@@ -480,6 +481,7 @@ public class Train : MonoBehaviour
                 onboard.RemoveAt(i);
             }
         }
+        st.NotifyAlighted(curTrack, off);        // 見た目だけ(降車客を出す)
         st.UpdateLabel();
         state = St.Dwell;
         dwellT = 25f;

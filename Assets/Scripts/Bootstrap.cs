@@ -164,7 +164,13 @@ public class Bootstrap : MonoBehaviour
         if (GameState.paused) return 0;
         int ticks = accumulator.Advance(unscaledDeltaSeconds);
         for (int i = 0; i < ticks; i++) SimTick(TickSeconds);
-        if (ticks > 0) foreach (var t in TrackNetwork.trains) t.PlaceCars();
+        if (ticks > 0)
+        {
+            foreach (var t in TrackNetwork.trains) t.PlaceCars();
+            // 人の更新はSimTickの外で行う。シミュレーションの決定性に影響させないため
+            float crowdDt = ticks * TickSeconds * GameState.timeScale;
+            foreach (var st in TrackNetwork.stations) st.UpdateCrowd(crowdDt);
+        }
         return ticks;
     }
 

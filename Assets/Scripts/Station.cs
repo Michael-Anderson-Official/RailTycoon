@@ -16,6 +16,21 @@ public class Station : MonoBehaviour
 
     public float Height => RailDimensions.HeightOfLevel(level);
 
+    // ホームに立つ人(視覚専用)。TotalWaitingから毎回導出するのでセーブには何も足さない
+    StationCrowd crowd;
+    public StationCrowd Crowd => crowd ?? (crowd = new StationCrowd(this));
+
+    // Bootstrap.RunFrameがtickを消化した後に呼ぶ。dtはシミュレーション秒
+    public void UpdateCrowd(float dt)
+    {
+        if (preview) return;
+        Crowd.Update(dt);
+    }
+
+    // 乗降の通知(Trainから。人の動きにしか使わず、シミュレーションには影響しない)
+    public void NotifyBoarded(int track, int n) { if (!preview) Crowd.NotifyBoarded(track, n); }
+    public void NotifyAlighted(int track, int n) { if (!preview) Crowd.NotifyAlighted(track, n); }
+
     public StationLayout.Result layout;
     public float dev;
     public bool[] occupied;
@@ -66,6 +81,7 @@ public class Station : MonoBehaviour
         for (int i = transform.childCount - 1; i >= 0; i--)
             DestroyImmediateSafe(transform.GetChild(i).gameObject);
         stationSigns.Clear();
+        crowd?.Clear();   // 子ごと消えているので、次のUpdateで作り直させる
         layout = StationLayout.Compute(faces, lines);
 
         if (oldEdges != null && oldFaces == faces && oldLines == lines && oldEdges.Count == layout.edges.Count)
