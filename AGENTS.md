@@ -130,7 +130,17 @@ git push https://github.com/Michael-Anderson-Official/RailTycoon.git master:gh-p
 pwshを起動できず(`CreateProcessAsUserW failed: 5 アクセスが拒否されました`)、
 `Starting Codex review thread`のまま10分以上進まない。
 
-動くのは`--scope working-tree`のみ。既にコミット済みの変更をレビューしたい場合は、
+**2026-07-26追記: `--scope working-tree`でも同じ場所でハングすることがある。**
+この日は3回連続で`Starting Codex review thread`から25分以上進まなかった
+(1回目はcodex.exeが落ちてラッパーだけが待ち続け、2・3回目はcodex.exeが生きたまま無応答)。
+プロセスを掃除して掛け直しても復帰しなかったため、その回はレビューをスキップし、
+自分で差分を点検して代替した(コミットメッセージにスキップした旨を明記すること)。
+
+**見分け方**: 正常なら数十秒で`[codex] Thread ready (...)`が出て、全体3〜5分で終わる。
+`Starting Codex review thread`のまま1〜2分動かなければ詰まりを疑ってよい。
+ログを`tail -f | grep -E "Thread ready|Reviewer|Turn completed"`で監視すると早く気付ける。
+
+動くときは`--scope working-tree`のみ。既にコミット済みの変更をレビューしたい場合は、
 その差分を一時ブランチ上で未コミット状態として再現してから掛ける:
 
 ```bash
@@ -245,6 +255,11 @@ git checkout -- Assets/ && git checkout master && git branch -D review-tmp
 
 ## 直近の変更(新しい順)
 
+- 停車位置目標を追加。位置は車窓カメラの幾何から逆算(鼻先+7.0m、高さ0.55m、
+  線路中心から1.00m)。縦画面は水平画角が約30°しかないため、線路脇に背の高い標識を
+  立てると画面下端へ来る前に横へ切れる。低く線路寄りに置くのはそのため
+- 駅の建て替えで長い編成がホームを突き抜ける不具合を修正(DispatchTrainの両数検査が
+  配車時にしか効いていなかった)。ホームの見た目を作り込み、高架の桁をスロートで絞った
 - 高架駅を追加(階による立体化、立体交差の許可、勾配上限35‰、セーブv5)
 - ホーム端を線路の収束に合わせて絞り、駅を建てる位置に当たり判定を追加
   (既存駅・既設線路との重なりを建設時に拒否)
